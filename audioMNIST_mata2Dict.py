@@ -1,6 +1,107 @@
 import os
 import numpy as np
 from scipy.io import wavfile
+from speakerfeatures import *
+import matplotlib.pyplot as plt
+import random
+import pickle
+from hmmlearn.hmm import GMMHMM as GMMHMM
+from sklearn.mixture import GaussianMixture
+
+def createGenderWavs_Features(metadata, fs, femaleIdx, maleIdx, path2GenderAudio, path2GenderFeatures):
+    genderDatasetsAudio = dict()
+    genderDatasetsFeatures = dict()
+    nGenders = 2
+    for dataset in ['train', 'validate', 'test']:
+        genderWavs = list(range(nGenders))
+        if dataset == 'train':
+            genderWavs[femaleIdx], genderWavs[maleIdx] = metadata.get_gender_train_set()
+        elif dataset == 'validate':
+            genderWavs[femaleIdx], genderWavs[maleIdx] = metadata.get_gender_validation_set()
+        else:
+            genderWavs[femaleIdx], genderWavs[maleIdx] = metadata.get_gender_test_set()
+
+        genderAudio = list(range(len(genderWavs)))
+        genderAudioLengths = list(range(len(genderWavs)))
+        genderFeatures = list(range(len(genderWavs)))
+        genderFeaturesLengths = list(range(len(genderWavs)))
+        for genderIdx, singleGenderList in enumerate(genderWavs):
+            for wavIdx, wav in enumerate(singleGenderList):
+                if wavIdx%100 == 0:
+                    print('dataset ',dataset,' starting gender %d feature extraction; wavIdx %d out of %d' % (genderIdx, wavIdx, len(singleGenderList)))
+                extractedFeatures = np.float32(extract_features(wav, fs))
+                wav = np.expand_dims(wav, axis=1)
+                if wavIdx == 0:
+                    genderAudio[genderIdx] = wav
+                    genderAudioLengths[genderIdx] = list()
+                    genderFeatures[genderIdx] = extractedFeatures
+                    genderFeaturesLengths[genderIdx] = list()
+                else:
+                    genderAudio[genderIdx] = np.vstack((genderAudio[genderIdx], wav))
+                    genderFeatures[genderIdx] = np.vstack((genderFeatures[genderIdx], extractedFeatures))
+                genderAudioLengths[genderIdx].append(wav.shape[0])
+                genderFeaturesLengths[genderIdx].append(extractedFeatures.shape[0])
+        genderAudioList = [genderAudio, genderAudioLengths]
+        genderFeaturesList = [genderFeatures, genderFeaturesLengths]
+        genderDatasetsAudio[dataset] = genderAudioList
+        genderDatasetsFeatures[dataset] = genderFeaturesList
+    pickle.dump(genderDatasetsAudio, open(path2GenderAudio, "wb"))
+    pickle.dump(genderDatasetsFeatures, open(path2GenderFeatures, "wb"))
+    return genderDatasetsFeatures
+
+def genderClassificationTrain(genderDatasetsFeatures, path2GenderModels):
+    nGenders = 2
+    covariance_type = 'diag'
+    nTrainIters = 5
+    max_nCorrect = -np.inf
+    for trainIter in range(nTrainIters):
+        nHmmStates = 1
+        genderModels = [GMMHMM(n_components=nHmmStates, n_mix=3, n_iter=200, covariance_type=covariance_type) for genderIdx in range(nGenders)]
+        #genderModelsSkLearn = [GaussianMixture(n_components=3, max_iter=200, covariance_type='diag', n_init=3) for genderIdx in range(nGenders)]
+        for genderIdx in range(nGenders):
+            lengthsVec = np.asarray(genderDatasetsFeatures['train'][1][genderIdx])
+            if nHmmStates == 1:
+                # empirically, train results are better with all the gender signals collapsed to a single signal
+                lengthsVec = np.expand_dims(lengthsVec.sum(), axis=0)
+            genderModels[genderIdx].fit(genderDatasetsFeatures['train'][0][genderIdx], lengths=lengthsVec)
+            #genderModelsSkLearn[genderIdx].fit(genderDatasetsFeatures['train'][0][genderIdx])#, np.asarray(genderDatasetsFeatures['train'][1][genderIdx]))
+
+        # validation:
+        datasetKey = 'validate'
+        nCorrect = 0
+        #nCorrectSkLearn = 0
+        nExamples = 0
+        genderResults = list()
+        #genderResultsSkLearn = list()
+        for genderIdx in range(nGenders):
+            nValExamples = np.asarray(genderDatasetsFeatures[datasetKey][1][genderIdx]).shape[0]
+            genderResult = np.zeros((nValExamples, nGenders))
+            #genderResultsSkLearn = np.zeros((nValExamples, nGenders))
+            startIdx = 0
+            for singleValIdx in range(nValExamples):
+                singleValLength = genderDatasetsFeatures[datasetKey][1][genderIdx][singleValIdx]
+                stopIdx = startIdx + singleValLength
+                wavFeatures = genderDatasetsFeatures[datasetKey][0][genderIdx][startIdx:stopIdx]
+                #wavFeatures = np.random.randn(*genderDatasetsFeatures[datasetKey][0][genderIdx][startIdx:stopIdx].shape)
+                for modelIdx in range(nGenders):
+                    genderResult[singleValIdx, modelIdx] = genderModels[modelIdx].score(wavFeatures)
+                    #genderResultsSkLearn[singleValIdx, modelIdx] = genderModelsSkLearn[modelIdx].score(wavFeatures)
+                startIdx += singleValLength
+            predictedGender = np.argmax(genderResult, axis=1)
+            #predictedGenderSkLearn = np.argmax(genderResultsSkLearn, axis=1)
+            nCorrectGender = (predictedGender == genderIdx).sum()
+            #nCorrectGenderSkLearn = (predictedGenderSkLearn == genderIdx).sum()
+            nCorrect += nCorrectGender
+            #nCorrectSkLearn += nCorrectGenderSkLearn
+            nExamples += nValExamples
+            genderResults.append(genderResult) # for future use
+            print('hmmgmm: genderIdx: %d: %d correct out of %d <=> %02.0f' % (genderIdx, nCorrectGender, nValExamples, nCorrectGender/nValExamples*100))
+            #print('sklearn: genderIdx: %d: %d correct out of %d' % (genderIdx, nCorrectGenderSkLearn, nValExamples))
+        if nCorrect > max_nCorrect:
+            max_nCorrect = nCorrect
+            genderModels2Save = genderModels
+
+    pickle.dump(genderModels2Save, open(path2GenderModels, "wb"))
 
 def createAudioMNIST_metadataDict():
     path2AudioMNIST = '/media/ront/Files/Projects/AudioMNIST/data/'
