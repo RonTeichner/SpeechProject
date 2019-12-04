@@ -8,100 +8,7 @@ import pickle
 from hmmlearn.hmm import GMMHMM as GMMHMM
 from sklearn.mixture import GaussianMixture
 
-def createGenderWavs_Features(metadata, fs, femaleIdx, maleIdx, path2GenderAudio, path2GenderFeatures):
-    genderDatasetsAudio = dict()
-    genderDatasetsFeatures = dict()
-    nGenders = 2
-    for dataset in ['train', 'validate', 'test']:
-        genderWavs = list(range(nGenders))
-        if dataset == 'train':
-            genderWavs[femaleIdx], genderWavs[maleIdx] = metadata.get_gender_train_set()
-        elif dataset == 'validate':
-            genderWavs[femaleIdx], genderWavs[maleIdx] = metadata.get_gender_validation_set()
-        else:
-            genderWavs[femaleIdx], genderWavs[maleIdx] = metadata.get_gender_test_set()
 
-        genderAudio = list(range(len(genderWavs)))
-        genderAudioLengths = list(range(len(genderWavs)))
-        genderFeatures = list(range(len(genderWavs)))
-        genderFeaturesLengths = list(range(len(genderWavs)))
-        for genderIdx, singleGenderList in enumerate(genderWavs):
-            for wavIdx, wav in enumerate(singleGenderList):
-                if wavIdx%100 == 0:
-                    print('dataset ',dataset,' starting gender %d feature extraction; wavIdx %d out of %d' % (genderIdx, wavIdx, len(singleGenderList)))
-                extractedFeatures = np.float32(extract_features(wav, fs))
-                wav = np.expand_dims(wav, axis=1)
-                if wavIdx == 0:
-                    genderAudio[genderIdx] = wav
-                    genderAudioLengths[genderIdx] = list()
-                    genderFeatures[genderIdx] = extractedFeatures
-                    genderFeaturesLengths[genderIdx] = list()
-                else:
-                    genderAudio[genderIdx] = np.vstack((genderAudio[genderIdx], wav))
-                    genderFeatures[genderIdx] = np.vstack((genderFeatures[genderIdx], extractedFeatures))
-                genderAudioLengths[genderIdx].append(wav.shape[0])
-                genderFeaturesLengths[genderIdx].append(extractedFeatures.shape[0])
-        genderAudioList = [genderAudio, genderAudioLengths]
-        genderFeaturesList = [genderFeatures, genderFeaturesLengths]
-        genderDatasetsAudio[dataset] = genderAudioList
-        genderDatasetsFeatures[dataset] = genderFeaturesList
-    pickle.dump(genderDatasetsAudio, open(path2GenderAudio, "wb"))
-    pickle.dump(genderDatasetsFeatures, open(path2GenderFeatures, "wb"))
-    return genderDatasetsFeatures
-
-def genderClassificationTrain(genderDatasetsFeatures, path2GenderModels):
-    nGenders = 2
-    covariance_type = 'diag'
-    nTrainIters = 5
-    max_nCorrect = -np.inf
-    for trainIter in range(nTrainIters):
-        nHmmStates = 1
-        genderModels = [GMMHMM(n_components=nHmmStates, n_mix=3, n_iter=200, covariance_type=covariance_type) for genderIdx in range(nGenders)]
-        #genderModelsSkLearn = [GaussianMixture(n_components=3, max_iter=200, covariance_type='diag', n_init=3) for genderIdx in range(nGenders)]
-        for genderIdx in range(nGenders):
-            lengthsVec = np.asarray(genderDatasetsFeatures['train'][1][genderIdx])
-            if nHmmStates == 1:
-                # empirically, train results are better with all the gender signals collapsed to a single signal
-                lengthsVec = np.expand_dims(lengthsVec.sum(), axis=0)
-            genderModels[genderIdx].fit(genderDatasetsFeatures['train'][0][genderIdx], lengths=lengthsVec)
-            #genderModelsSkLearn[genderIdx].fit(genderDatasetsFeatures['train'][0][genderIdx])#, np.asarray(genderDatasetsFeatures['train'][1][genderIdx]))
-
-        # validation:
-        datasetKey = 'validate'
-        nCorrect = 0
-        #nCorrectSkLearn = 0
-        nExamples = 0
-        genderResults = list()
-        #genderResultsSkLearn = list()
-        for genderIdx in range(nGenders):
-            nValExamples = np.asarray(genderDatasetsFeatures[datasetKey][1][genderIdx]).shape[0]
-            genderResult = np.zeros((nValExamples, nGenders))
-            #genderResultsSkLearn = np.zeros((nValExamples, nGenders))
-            startIdx = 0
-            for singleValIdx in range(nValExamples):
-                singleValLength = genderDatasetsFeatures[datasetKey][1][genderIdx][singleValIdx]
-                stopIdx = startIdx + singleValLength
-                wavFeatures = genderDatasetsFeatures[datasetKey][0][genderIdx][startIdx:stopIdx]
-                #wavFeatures = np.random.randn(*genderDatasetsFeatures[datasetKey][0][genderIdx][startIdx:stopIdx].shape)
-                for modelIdx in range(nGenders):
-                    genderResult[singleValIdx, modelIdx] = genderModels[modelIdx].score(wavFeatures)
-                    #genderResultsSkLearn[singleValIdx, modelIdx] = genderModelsSkLearn[modelIdx].score(wavFeatures)
-                startIdx += singleValLength
-            predictedGender = np.argmax(genderResult, axis=1)
-            #predictedGenderSkLearn = np.argmax(genderResultsSkLearn, axis=1)
-            nCorrectGender = (predictedGender == genderIdx).sum()
-            #nCorrectGenderSkLearn = (predictedGenderSkLearn == genderIdx).sum()
-            nCorrect += nCorrectGender
-            #nCorrectSkLearn += nCorrectGenderSkLearn
-            nExamples += nValExamples
-            genderResults.append(genderResult) # for future use
-            print('hmmgmm: genderIdx: %d: %d correct out of %d <=> %02.0f' % (genderIdx, nCorrectGender, nValExamples, nCorrectGender/nValExamples*100))
-            #print('sklearn: genderIdx: %d: %d correct out of %d' % (genderIdx, nCorrectGenderSkLearn, nValExamples))
-        if nCorrect > max_nCorrect:
-            max_nCorrect = nCorrect
-            genderModels2Save = genderModels
-
-    pickle.dump(genderModels2Save, open(path2GenderModels, "wb"))
 
 def createAudioMNIST_metadataDict():
     path2AudioMNIST = '/media/ront/Files/Projects/AudioMNIST/data/'
@@ -673,24 +580,28 @@ class AudioMNISTMetaData:
                 break
             break
 
-    def label_train_sets(self, trainPortion, validatePortion, testPortion):
+    def label_train_sets(self, trainPortion, validatePortion, testPortion, genderEqual):
         nonePortion = 1 - (trainPortion + validatePortion + testPortion)
-
-        nMales, nFemales = self.get_number_of_males_females()
-        # We want an equal no. of men and women files within the sets
-        female2maleFactor = nFemales/nMales
-        if female2maleFactor < 1:
-            femaleTrainPortion, femaleValidationPortion, femaleTestPortion = trainPortion/female2maleFactor, validatePortion/female2maleFactor, testPortion/female2maleFactor
-            if femaleTrainPortion + femaleValidationPortion + femaleTestPortion > 1:
-                shrinkFactor = femaleTrainPortion + femaleValidationPortion + femaleTestPortion
-                femaleTrainPortion, femaleValidationPortion, femaleTestPortion, femaleNonePortion = femaleTrainPortion/shrinkFactor, femaleValidationPortion/shrinkFactor, femaleTestPortion/shrinkFactor, 0
-                maleTrainPortion, maleValidationPortion, maleTestPortion = trainPortion / shrinkFactor, validatePortion / shrinkFactor, testPortion / shrinkFactor
-                maleNonePortion = 1 - (maleTrainPortion + maleValidationPortion + maleTestPortion)
+        if genderEqual:
+            nMales, nFemales = self.get_number_of_males_females()
+            # We want an equal no. of men and women files within the sets
+            female2maleFactor = nFemales/nMales
+            if female2maleFactor < 1:
+                femaleTrainPortion, femaleValidationPortion, femaleTestPortion = trainPortion/female2maleFactor, validatePortion/female2maleFactor, testPortion/female2maleFactor
+                if femaleTrainPortion + femaleValidationPortion + femaleTestPortion > 1:
+                    shrinkFactor = femaleTrainPortion + femaleValidationPortion + femaleTestPortion
+                    femaleTrainPortion, femaleValidationPortion, femaleTestPortion, femaleNonePortion = femaleTrainPortion/shrinkFactor, femaleValidationPortion/shrinkFactor, femaleTestPortion/shrinkFactor, 0
+                    maleTrainPortion, maleValidationPortion, maleTestPortion = trainPortion / shrinkFactor, validatePortion / shrinkFactor, testPortion / shrinkFactor
+                    maleNonePortion = 1 - (maleTrainPortion + maleValidationPortion + maleTestPortion)
+                else:
+                    maleTrainPortion, maleValidationPortion, maleTestPortion, maleNonePortion = trainPortion, validatePortion, testPortion, nonePortion
+                    femaleNonePortion = 1 - (femaleTrainPortion + femaleValidationPortion + femaleTestPortion)
             else:
-                maleTrainPortion, maleValidationPortion, maleTestPortion, maleNonePortion = trainPortion, validatePortion, testPortion, nonePortion
-                femaleNonePortion = 1 - (femaleTrainPortion + femaleValidationPortion + femaleTestPortion)
+                raise Exception('dataset with more females than males, not implemeted')
         else:
-            raise Exception('dataset with more females than males, not implemeted')
+            maleTrainPortion, maleValidationPortion, maleTestPortion, maleNonePortion = trainPortion, validatePortion, testPortion, nonePortion
+            femaleTrainPortion, femaleValidationPortion, femaleTestPortion, femaleNonePortion = trainPortion, validatePortion, testPortion, nonePortion
+
 
         for libraryKey in self.metaDataDict.keys():
             for digitKey in self.metaDataDict[libraryKey]['pathsDict'].keys():
@@ -702,47 +613,50 @@ class AudioMNISTMetaData:
                         y[1] = int(np.argwhere(np.random.multinomial(1, pvals=[femaleTrainPortion, femaleValidationPortion, femaleTestPortion, femaleNonePortion])))
                     self.metaDataDict[libraryKey]['pathsDict'][digitKey][pathIdx] = tuple(y)
 
-    def get_gender_train_set(self):
+    def get_gender_set(self, dataset):
+        if dataset == 'train':
+            datasetEnum = self.trainEnum
+        elif dataset == 'validate':
+            datasetEnum = self.validateEnum
+        else:
+            datasetEnum = self.testEnum
         femaleList, maleList = list(), list()
         for libraryKey in self.metaDataDict.keys():
             for digitKey in self.metaDataDict[libraryKey]['pathsDict'].keys():
                 for pathIdx in range(len(self.metaDataDict[libraryKey]['pathsDict'][digitKey])):
-                    included = self.metaDataDict[libraryKey]['pathsDict'][digitKey][pathIdx][1] == self.trainEnum
+                    included = self.metaDataDict[libraryKey]['pathsDict'][digitKey][pathIdx][1] == datasetEnum
                     if included:
                         _, wavData = wavfile.read(self.metaDataDict[libraryKey]['pathsDict'][digitKey][pathIdx][0])
                         if self.metaDataDict[libraryKey]['gender'] == 'male':
                             maleList.append(wavData)
                         else:
                             femaleList.append(wavData)
-        return femaleList, maleList
+        return [femaleList, maleList]
 
-    def get_gender_test_set(self):
-        femaleList, maleList = list(), list()
+    def get_speakers_gender_list(self):
+        speakersGenderList = list()
         for libraryKey in self.metaDataDict.keys():
-            for digitKey in self.metaDataDict[libraryKey]['pathsDict'].keys():
-                for pathIdx in range(len(self.metaDataDict[libraryKey]['pathsDict'][digitKey])):
-                    included = self.metaDataDict[libraryKey]['pathsDict'][digitKey][pathIdx][1] == self.testEnum
-                    if included:
-                        _, wavData = wavfile.read(self.metaDataDict[libraryKey]['pathsDict'][digitKey][pathIdx][0])
-                        if self.metaDataDict[libraryKey]['gender'] == 'male':
-                            maleList.append(wavData)
-                        else:
-                            femaleList.append(wavData)
-        return femaleList, maleList
+            speakersGenderList.append(self.metaDataDict[libraryKey]['gender'])
+        return speakersGenderList
 
-    def get_gender_validation_set(self):
-        femaleList, maleList = list(), list()
+    def get_speaker_set(self, dataset):
+        if dataset == 'train':
+            datasetEnum = self.trainEnum
+        elif dataset == 'validate':
+            datasetEnum = self.validateEnum
+        else:
+            datasetEnum = self.testEnum
+
+        speakersLists = list()
         for libraryKey in self.metaDataDict.keys():
+            speakersLists.append(list())
             for digitKey in self.metaDataDict[libraryKey]['pathsDict'].keys():
                 for pathIdx in range(len(self.metaDataDict[libraryKey]['pathsDict'][digitKey])):
-                    included = self.metaDataDict[libraryKey]['pathsDict'][digitKey][pathIdx][1] == self.validateEnum
+                    included = self.metaDataDict[libraryKey]['pathsDict'][digitKey][pathIdx][1] == datasetEnum
                     if included:
                         _, wavData = wavfile.read(self.metaDataDict[libraryKey]['pathsDict'][digitKey][pathIdx][0])
-                        if self.metaDataDict[libraryKey]['gender'] == 'male':
-                            maleList.append(wavData)
-                        else:
-                            femaleList.append(wavData)
-        return femaleList, maleList
+                        speakersLists[-1].append(wavData)
+        return speakersLists
 
     def get_number_of_males_females(self):
         nMales, nFemales = 0, 0
@@ -754,3 +668,85 @@ class AudioMNISTMetaData:
                 else:
                     nFemales += nFilesInDir
         return nMales, nFemales
+
+def createSpeakerWavs_Features(metadata, fs, path2SpeakerAudio, path2SpeakerFeatures, type):
+    speakerDatasetsAudio = dict()
+    speakerDatasetsFeatures = dict()
+    for dataset in ['train', 'validate', 'test']:
+        if type == 'speakers':
+            speakerWavs = metadata.get_speaker_set(dataset)
+        elif type == 'genders':
+            speakerWavs = metadata.get_gender_set(dataset)
+
+        speakerAudio = list(range(len(speakerWavs)))
+        speakerAudioLengths = list(range(len(speakerWavs)))
+        speakerFeatures = list(range(len(speakerWavs)))
+        speakerFeaturesLengths = list(range(len(speakerWavs)))
+        for speakerIdx, singleSpeakerList in enumerate(speakerWavs):
+            for wavIdx, wav in enumerate(singleSpeakerList):
+                if wavIdx%100 == 0:
+                    print('dataset ',dataset,' starting speaker %d feature extraction; wavIdx %d out of %d' % (speakerIdx, wavIdx, len(singleSpeakerList)))
+                extractedFeatures = np.float32(extract_features(wav, fs))
+                wav = np.expand_dims(wav, axis=1)
+                if wavIdx == 0:
+                    speakerAudio[speakerIdx] = wav
+                    speakerAudioLengths[speakerIdx] = list()
+                    speakerFeatures[speakerIdx] = extractedFeatures
+                    speakerFeaturesLengths[speakerIdx] = list()
+                else:
+                    speakerAudio[speakerIdx] = np.vstack((speakerAudio[speakerIdx], wav))
+                    speakerFeatures[speakerIdx] = np.vstack((speakerFeatures[speakerIdx], extractedFeatures))
+                speakerAudioLengths[speakerIdx].append(wav.shape[0])
+                speakerFeaturesLengths[speakerIdx].append(extractedFeatures.shape[0])
+        speakerAudioList = [speakerAudio, speakerAudioLengths]
+        speakerFeaturesList = [speakerFeatures, speakerFeaturesLengths]
+        speakerDatasetsAudio[dataset] = speakerAudioList
+        speakerDatasetsFeatures[dataset] = speakerFeaturesList
+    pickle.dump(speakerDatasetsAudio, open(path2SpeakerAudio, "wb"))
+    pickle.dump(speakerDatasetsFeatures, open(path2SpeakerFeatures, "wb"))
+    return speakerDatasetsFeatures
+
+
+def speakerClassificationTrain(speakerDatasetsFeatures, path2SpeakerModels):
+    nSpeakers = len(speakerDatasetsFeatures['train'][0])
+    covariance_type = 'diag'
+    nTrainIters = 5
+    max_nCorrect = -np.inf
+    for trainIter in range(nTrainIters):
+        nHmmStates = 1
+        speakerModels = [GMMHMM(n_components=nHmmStates, n_mix=3, n_iter=200, covariance_type=covariance_type) for speakerIdx in range(nSpeakers)]
+        for speakerIdx in range(nSpeakers):
+            lengthsVec = np.asarray(speakerDatasetsFeatures['train'][1][speakerIdx])
+            if nHmmStates == 1:
+                # empirically, train results are better with all the gender signals collapsed to a single signal
+                lengthsVec = np.expand_dims(lengthsVec.sum(), axis=0)
+            speakerModels[speakerIdx].fit(speakerDatasetsFeatures['train'][0][speakerIdx], lengths=lengthsVec)
+
+        # validation:
+        datasetKey = 'validate'
+        nCorrect = 0
+        nExamples = 0
+        genderResults = list()
+        for speakerIdx in range(nSpeakers):
+            nValExamples = np.asarray(speakerDatasetsFeatures[datasetKey][1][speakerIdx]).shape[0]
+            speakerResult = np.zeros((nValExamples, nSpeakers))
+            startIdx = 0
+            for singleValIdx in range(nValExamples):
+                singleValLength = speakerDatasetsFeatures[datasetKey][1][speakerIdx][singleValIdx]
+                stopIdx = startIdx + singleValLength
+                wavFeatures = speakerDatasetsFeatures[datasetKey][0][speakerIdx][startIdx:stopIdx]
+                for modelIdx in range(nSpeakers):
+                    speakerResult[singleValIdx, modelIdx] = speakerModels[modelIdx].score(wavFeatures)
+                startIdx += singleValLength
+            predictedSpeaker = np.argmax(speakerResult, axis=1)
+            nCorrectSpeaker = (predictedSpeaker == speakerIdx).sum()
+            nCorrect += nCorrectSpeaker
+            nExamples += nValExamples
+            genderResults.append(speakerResult) # for future use
+            print('hmmgmm: groupIdx: %d: %d correct out of %d <=> %02.0f%%' % (speakerIdx, nCorrectSpeaker, nValExamples, nCorrectSpeaker/nValExamples*100))
+        if nCorrect > max_nCorrect:
+            max_nCorrect = nCorrect
+            speakerModels2Save = speakerModels
+        print('best performance on validation set: %d correct out of %d <=> %02.0f%%' % (nCorrect, nExamples, nCorrect / nExamples * 100))
+
+    pickle.dump(speakerModels2Save, open(path2SpeakerModels, "wb"))
