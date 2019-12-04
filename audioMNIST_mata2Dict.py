@@ -658,6 +658,26 @@ class AudioMNISTMetaData:
                         speakersLists[-1].append(wavData)
         return speakersLists
 
+    def get_word_set(self, dataset):
+        if dataset == 'train':
+            datasetEnum = self.trainEnum
+        elif dataset == 'validate':
+            datasetEnum = self.validateEnum
+        else:
+            datasetEnum = self.testEnum
+
+        wordLists = list()
+        firstLibraryKey = [*self.metaDataDict.keys()][0]
+        for digitKey in self.metaDataDict[firstLibraryKey]['pathsDict'].keys(): # digitKeys from all libraries are the same
+            wordLists.append(list())
+            for libraryKey in self.metaDataDict.keys():
+                for pathIdx in range(len(self.metaDataDict[libraryKey]['pathsDict'][digitKey])):
+                    included = self.metaDataDict[libraryKey]['pathsDict'][digitKey][pathIdx][1] == datasetEnum
+                    if included:
+                        _, wavData = wavfile.read(self.metaDataDict[libraryKey]['pathsDict'][digitKey][pathIdx][0])
+                        wordLists[-1].append(wavData)
+        return wordLists
+
     def get_number_of_males_females(self):
         nMales, nFemales = 0, 0
         for libraryKey in self.metaDataDict.keys():
@@ -677,6 +697,8 @@ def createSpeakerWavs_Features(metadata, fs, path2SpeakerAudio, path2SpeakerFeat
             speakerWavs = metadata.get_speaker_set(dataset)
         elif type == 'genders':
             speakerWavs = metadata.get_gender_set(dataset)
+        elif type == 'words':
+            speakerWavs = metadata.get_word_set(dataset)
 
         speakerAudio = list(range(len(speakerWavs)))
         speakerAudioLengths = list(range(len(speakerWavs)))
@@ -707,14 +729,17 @@ def createSpeakerWavs_Features(metadata, fs, path2SpeakerAudio, path2SpeakerFeat
     return speakerDatasetsFeatures
 
 
-def speakerClassificationTrain(speakerDatasetsFeatures, path2SpeakerModels):
+def speakerClassificationTrain(speakerDatasetsFeatures, path2SpeakerModels, type='speaker'):
     nSpeakers = len(speakerDatasetsFeatures['train'][0])
     covariance_type = 'diag'
     nTrainIters = 5
     max_nCorrect = -np.inf
     for trainIter in range(nTrainIters):
-        nHmmStates = 1
-        speakerModels = [GMMHMM(n_components=nHmmStates, n_mix=3, n_iter=200, covariance_type=covariance_type) for speakerIdx in range(nSpeakers)]
+        if type == 'speaker':
+            nHmmStates, nMix = 1, 3
+        elif type == 'words':
+            nHmmStates, nMix = 6, 1
+        speakerModels = [GMMHMM(n_components=nHmmStates, n_mix=nMix, n_iter=200, covariance_type=covariance_type) for speakerIdx in range(nSpeakers)]
         for speakerIdx in range(nSpeakers):
             lengthsVec = np.asarray(speakerDatasetsFeatures['train'][1][speakerIdx])
             if nHmmStates == 1:
