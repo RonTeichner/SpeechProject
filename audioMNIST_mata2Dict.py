@@ -775,3 +775,79 @@ def speakerClassificationTrain(speakerDatasetsFeatures, path2SpeakerModels, type
         print('best performance on validation set: %d correct out of %d <=> %02.0f%%' % (nCorrect, nExamples, nCorrect / nExamples * 100))
 
     pickle.dump(speakerModels2Save, open(path2SpeakerModels, "wb"))
+
+def createSentencesMetadata(metadata, path2SentencesMetadata, nSentences = 500):
+    # create sentence transitionMat:
+    nDigits = 10
+    transitionMat = np.zeros((nDigits, nDigits))
+    for currentState in range(nDigits):
+        for nextState in range(nDigits):
+            if nextState == currentState:
+                i = nDigits
+            else:
+                i = (nextState - currentState) % nDigits
+            transitionMat[nextState, currentState] = np.power(2.0, -i)
+
+    for currentState in range(nDigits):
+        transitionMat[:, currentState] = transitionMat[:, currentState] / transitionMat[:, currentState].sum()
+
+    priorStates = np.ones(nDigits) / nDigits
+    # The dataset will consist of a list of sublists. each sublist has a library key (pointing to a specific speaker) in the first entrie.
+    # Following are tuples - digitKey & path to specific file
+
+    min_nWordsPerSentence = 3
+    max_nWordsPerSentence = 8
+    listOfLibraryKeys = list(metadata.metaDataDict.keys())
+    sentencesMetadata = list()
+    for sentenceIdx in range(nSentences):
+        sentencesMetadata.append(list())
+        libraryKey = random.choice(listOfLibraryKeys)
+        sentenceLength = np.random.randint(low=min_nWordsPerSentence, high=max_nWordsPerSentence + 1)
+        sentencesMetadata[-1].append(libraryKey)
+        for digitIdx in range(sentenceLength):
+            if digitIdx == 0:
+                digit = int(np.argwhere(np.random.multinomial(1, pvals=priorStates)))
+            else:
+                digit = int(np.argwhere(np.random.multinomial(1, pvals=transitionMat[:, digit])))
+            foundTest = False
+            while not foundTest:
+                specificDigit = list(random.choice(metadata.metaDataDict[libraryKey]['pathsDict'][digit]))
+                foundTest = specificDigit[1] == metadata.testEnum
+            sentencesMetadata[-1].append((digit, specificDigit[0]))
+    pickle.dump([sentencesMetadata, priorStates, transitionMat], open(path2SentencesMetadata, "wb"))
+    return sentencesMetadata, priorStates, transitionMat
+
+def createSentenceWavs_Features(sentencesMetadata, path2SentencesAudio, path2SentencesFeatures):
+    sentencesAudio = sentencesMetadata.copy()
+    sentencesFeatures = sentencesMetadata.copy()
+    for sentenceIdx, sentenceMetadata in enumerate(sentencesMetadata):
+        if sentenceIdx % 100 == 0:
+            print('starting sentence %d out of %d' % (sentenceIdx, len(sentencesMetadata)))
+        for wordIdx, wordPath in enumerate(sentenceMetadata):
+            if wordIdx == 0:
+                continue
+            fs, wav = wavfile.read(list(wordPath)[1])
+            digit = wordPath[0]
+            sentencesAudio[sentenceIdx][wordIdx] = (digit, wav)
+            sentencesFeatures[sentenceIdx][wordIdx] = (digit, np.float32(extract_features(wav, fs)))
+    pickle.dump(sentencesAudio, open(path2SentencesAudio, "wb"))
+    pickle.dump(sentencesFeatures, open(path2SentencesFeatures, "wb"))
+    return sentencesFeatures
+
+def log2probs(logProbs):
+    logProbs -= logProbs.max() # now max value is zero
+    probs = np.exp(np.maximum(logProbs, -30)) # setting min value of -30 for log-values
+    return probs / probs.sum()
+
+def computeFilteringSmoothing(models, sentence, sentenceModel):
+    nModels, nWords = len(models), len(sentence)
+    framelogprob = np.zeros([nWords, nModels])
+    for wordIdx in range(1, nWords):
+        for modelIdx in range(nModels):
+            framelogprob[wordIdx, modelIdx] = models[modelIdx].score(sentence[wordIdx][1])
+
+    logprob, fwdlattice = sentenceModel._do_forward_pass(framelogprob)
+    bwdlattice = sentenceModel._do_backward_pass(framelogprob)
+    smoothing = sentenceModel._compute_posteriors(fwdlattice, bwdlattice)
+    filtering = np.apply_along_axis(log2probs, axis=1, arr=fwdlattice)
+    return filtering, smoothing
