@@ -31,6 +31,8 @@ path2SentencesMetadata = './SentencesMetadata.pt'
 path2SentencesAudio = './SentencesAudio.pt'
 path2SentencesFeatures = './SentencesFeatures.pt'
 
+path2SentencesResults = './SentencesResults'
+
 nGenders = 2
 femaleIdx, maleIdx = np.arange(nGenders)
 
@@ -83,8 +85,8 @@ if enableWordDetection:
     # create\load speakers features:
     if os.path.isfile(path2WordFeatures):
         wordDatasetsFeatures = pickle.load(open(path2WordFeatures, "rb"))
-        # wordDatasetsAudio = pickle.load(open(path2WordAudio, "rb"))
-        # sd.play(wordDatasetsAudio['train'][0][0],fs)
+        # speakerDatasetsAudio = pickle.load(open(path2SpeakerAudio, "rb"))
+        # sd.play(speakerDatasetsAudio['test'][0][0],fs)
         # sd.stop()
     else:
         wordDatasetsFeatures = createSpeakerWavs_Features(metadata, fs, path2WordAudio, path2WordFeatures, 'words')
@@ -96,59 +98,67 @@ if enableWordDetection:
         speakerClassificationTrain(wordDatasetsFeatures, path2WordModels, 'words')
 
 if enableSentenceDetection:
-    # create sentences dataset:
-    if os.path.isfile(path2SentencesMetadata):
-        sentencesMetadata, priorStates, transitionMat = pickle.load(open(path2SentencesMetadata, "rb"))
+    if os.path.isfile(path2SentencesResults):
+        sentencesEstimationResults = pickle.load(open(path2SentencesResults, "rb"))
     else:
-        sentencesMetadata, priorStates, transitionMat = createSentencesMetadata(metadata, path2SentencesMetadata)
+        # create sentences dataset:
+        if os.path.isfile(path2SentencesMetadata):
+            sentencesMetadata, priorStates, transitionMat = pickle.load(open(path2SentencesMetadata, "rb"))
+            # sentencesDatasetsAudio = pickle.load(open(path2SentencesAudio, "rb"))
+            # sd.play(wordDatasetsAudio['train'][0][0],fs)
+            # sd.stop()
+        else:
+            sentencesMetadata, priorStates, transitionMat = createSentencesMetadata(metadata, path2SentencesMetadata)
 
-    # create\load sentences features:
-    if os.path.isfile(path2SentencesFeatures):
-        sentencesDatasetsFeatures = pickle.load(open(path2SentencesFeatures, "rb"))
-    else:
-        sentencesDatasetsFeatures = createSentenceWavs_Features(sentencesMetadata, path2SentencesAudio, path2SentencesFeatures)
+        # create\load sentences features:
+        if os.path.isfile(path2SentencesFeatures):
+            sentencesDatasetsFeatures = pickle.load(open(path2SentencesFeatures, "rb"))
+        else:
+            sentencesDatasetsFeatures = createSentenceWavs_Features(sentencesMetadata, path2SentencesAudio, path2SentencesFeatures)
 
-    # load models:
-    wordModels = pickle.load(open(path2WordModels, "rb"))
-    speakerModels = pickle.load(open(path2SpeakerModels, "rb"))
-    genderModels = pickle.load(open(path2GenderModels, "rb"))
+        # load models:
+        wordModels = pickle.load(open(path2WordModels, "rb"))
+        speakerModels = pickle.load(open(path2SpeakerModels, "rb"))
+        genderModels = pickle.load(open(path2GenderModels, "rb"))
 
-    nGenderModels = len(genderModels)
-    genderSentenceModel = GMMHMM(n_components=nGenderModels, n_mix=1, n_iter=200, covariance_type='diag').fit(np.random.randn(100, nGenderModels)) # fit creates all internal variables
-    genderSentenceModel.transmat_, genderSentenceModel.startprob_ = np.eye(nGenderModels), np.ones(nGenderModels)/nGenderModels
+        nGenderModels = len(genderModels)
+        genderSentenceModel = GMMHMM(n_components=nGenderModels, n_mix=1, n_iter=200, covariance_type='diag').fit(np.random.randn(100, nGenderModels)) # fit creates all internal variables
+        genderSentenceModel.transmat_, genderSentenceModel.startprob_ = np.eye(nGenderModels), np.ones(nGenderModels)/nGenderModels
 
-    nSpeakersModels = len(speakerModels)
-    speakerSentenceModel = GMMHMM(n_components=nSpeakersModels, n_mix=1, n_iter=200, covariance_type='diag').fit(np.random.randn(100, nSpeakersModels))  # fit creates all internal variables
-    speakerSentenceModel.transmat_, speakerSentenceModel.startprob_ = np.eye(nSpeakersModels), np.ones(nSpeakersModels)/nSpeakersModels
+        nSpeakersModels = len(speakerModels)
+        speakerSentenceModel = GMMHMM(n_components=nSpeakersModels, n_mix=1, n_iter=200, covariance_type='diag').fit(np.random.randn(100, nSpeakersModels))  # fit creates all internal variables
+        speakerSentenceModel.transmat_, speakerSentenceModel.startprob_ = np.eye(nSpeakersModels), np.ones(nSpeakersModels)/nSpeakersModels
 
-    nWordModels = len(wordModels)
-    wordSentenceModel = GMMHMM(n_components=nWordModels, n_mix=1, n_iter=200, covariance_type='diag').fit(np.random.randn(100, nWordModels))  # fit creates all internal variables
-    wordSentenceModel.transmat_, wordSentenceModel.startprob_ = transitionMat, priorStates
-
-
-
-    sentencesEstimationResults = list()
-    for sentence in sentencesDatasetsFeatures:
-        sentenceDict = dict()
-        nWords = len(sentence)
-        sentenceDict['groundTruth'] = dict()
-        sentenceDict['groundTruth']['SpeakerNo'] = sentence[0]
-        sentenceDict['groundTruth']['SpeakerGender'] = metadata.metaDataDict[sentence[0]]['gender']
-        sentenceDict['groundTruth']['Digits'] = [sentence[i][0] for i in range(1, nWords)]
-
-        sentenceDict['results'] = dict()
-
-        sentenceDict['results']['gender'] = dict()
-        sentenceDict['results']['gender']['filtering'], sentenceDict['results']['gender']['smoothing'] = computeFilteringSmoothing(genderModels, sentence, genderSentenceModel)
-
-        sentenceDict['results']['speaker'] = dict()
-        sentenceDict['results']['speaker']['filtering'], sentenceDict['results']['speaker']['smoothing'] = computeFilteringSmoothing(speakerModels, sentence, speakerSentenceModel)
-
-        sentenceDict['results']['word'] = dict()
-        sentenceDict['results']['word']['filtering'], sentenceDict['results']['word']['smoothing'] = computeFilteringSmoothing(wordModels, sentence, wordSentenceModel)
+        nWordModels = len(wordModels)
+        wordSentenceModel = GMMHMM(n_components=nWordModels, n_mix=1, n_iter=200, covariance_type='diag').fit(np.random.randn(100, nWordModels))  # fit creates all internal variables
+        wordSentenceModel.transmat_, wordSentenceModel.startprob_ = transitionMat, priorStates
 
 
-        x = 3
+
+        sentencesEstimationResults = list()
+        for sentenceIdx, sentence in enumerate(sentencesDatasetsFeatures):
+            if sentenceIdx % 100 == 0:
+                print('starting sentence %d estimation out of %d' % (sentenceIdx, len(sentencesDatasetsFeatures)))
+            sentenceDict = dict()
+            nWords = len(sentence)
+            sentenceDict['groundTruth'] = dict()
+            sentenceDict['groundTruth']['SpeakerNo'] = sentence[0]
+            sentenceDict['groundTruth']['SpeakerGender'] = metadata.metaDataDict[sentence[0]]['gender']
+            sentenceDict['groundTruth']['Digits'] = [sentence[i][0] for i in range(1, nWords)]
+
+            sentenceDict['results'] = dict()
+
+            sentenceDict['results']['gender'] = dict()
+            sentenceDict['results']['gender']['filtering'], sentenceDict['results']['gender']['smoothing'] = computeFilteringSmoothing(genderModels, sentence, genderSentenceModel)
+
+            sentenceDict['results']['speaker'] = dict()
+            sentenceDict['results']['speaker']['filtering'], sentenceDict['results']['speaker']['smoothing'] = computeFilteringSmoothing(speakerModels, sentence, speakerSentenceModel)
+
+            sentenceDict['results']['word'] = dict()
+            sentenceDict['results']['word']['filtering'], sentenceDict['results']['word']['smoothing'] = computeFilteringSmoothing(wordModels, sentence, wordSentenceModel)
+
+            sentencesEstimationResults.append(sentenceDict)
+        pickle.dump(sentencesEstimationResults, open(path2SentencesResults, "wb"))
 
 
 

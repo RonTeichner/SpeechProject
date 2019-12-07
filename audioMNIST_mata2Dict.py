@@ -7,7 +7,7 @@ import random
 import pickle
 from hmmlearn.hmm import GMMHMM as GMMHMM
 from sklearn.mixture import GaussianMixture
-
+from copy import deepcopy
 
 
 def createAudioMNIST_metadataDict():
@@ -786,10 +786,10 @@ def createSentencesMetadata(metadata, path2SentencesMetadata, nSentences = 500):
                 i = nDigits
             else:
                 i = (nextState - currentState) % nDigits
-            transitionMat[nextState, currentState] = np.power(2.0, -i)
+            transitionMat[currentState, nextState] = np.power(2.0, -i)
 
     for currentState in range(nDigits):
-        transitionMat[:, currentState] = transitionMat[:, currentState] / transitionMat[:, currentState].sum()
+        transitionMat[currentState, :] = transitionMat[currentState, :] / transitionMat[currentState, :].sum()
 
     priorStates = np.ones(nDigits) / nDigits
     # The dataset will consist of a list of sublists. each sublist has a library key (pointing to a specific speaker) in the first entrie.
@@ -808,7 +808,7 @@ def createSentencesMetadata(metadata, path2SentencesMetadata, nSentences = 500):
             if digitIdx == 0:
                 digit = int(np.argwhere(np.random.multinomial(1, pvals=priorStates)))
             else:
-                digit = int(np.argwhere(np.random.multinomial(1, pvals=transitionMat[:, digit])))
+                digit = int(np.argwhere(np.random.multinomial(1, pvals=transitionMat[digit, :])))
             foundTest = False
             while not foundTest:
                 specificDigit = list(random.choice(metadata.metaDataDict[libraryKey]['pathsDict'][digit]))
@@ -818,8 +818,8 @@ def createSentencesMetadata(metadata, path2SentencesMetadata, nSentences = 500):
     return sentencesMetadata, priorStates, transitionMat
 
 def createSentenceWavs_Features(sentencesMetadata, path2SentencesAudio, path2SentencesFeatures):
-    sentencesAudio = sentencesMetadata.copy()
-    sentencesFeatures = sentencesMetadata.copy()
+    sentencesAudio = deepcopy(sentencesMetadata)
+    sentencesFeatures = deepcopy(sentencesMetadata)
     for sentenceIdx, sentenceMetadata in enumerate(sentencesMetadata):
         if sentenceIdx % 100 == 0:
             print('starting sentence %d out of %d' % (sentenceIdx, len(sentencesMetadata)))
@@ -840,14 +840,36 @@ def log2probs(logProbs):
     return probs / probs.sum()
 
 def computeFilteringSmoothing(models, sentence, sentenceModel):
-    nModels, nWords = len(models), len(sentence)
-    framelogprob = np.zeros([nWords, nModels])
-    for wordIdx in range(1, nWords):
+    nModels, nFrames = len(models), len(sentence)-1
+    framelogprob = np.zeros([nFrames, nModels])
+    for frameIdx in range(nFrames):
         for modelIdx in range(nModels):
-            framelogprob[wordIdx, modelIdx] = models[modelIdx].score(sentence[wordIdx][1])
+            framelogprob[frameIdx, modelIdx] = models[modelIdx].score(sentence[frameIdx+1][1])
 
+    # probs = np.apply_along_axis(log2probs, axis=1, arr=framelogprob.copy())
     logprob, fwdlattice = sentenceModel._do_forward_pass(framelogprob)
     bwdlattice = sentenceModel._do_backward_pass(framelogprob)
     smoothing = sentenceModel._compute_posteriors(fwdlattice, bwdlattice)
-    filtering = np.apply_along_axis(log2probs, axis=1, arr=fwdlattice)
+    filtering = np.apply_along_axis(log2probs, axis=1, arr=fwdlattice.copy())
+    '''
+    # code for verifying that the transmat is read correctly by self implementation of the forward pass:
+    probs = np.random.rand(*framelogprob.shape)
+    myfwdlattice = myForwardPass(np.log(probs), sentenceModel.transmat_)
+    _, myfwdlatticeCompare = sentenceModel._do_forward_pass(np.log(probs))
+    compRes = myfwdlatticeCompare - myfwdlattice
+    '''
     return filtering, smoothing
+
+def myForwardPass(framelogprob, transmat):
+    myfwdlattice = np.zeros_like(framelogprob)
+    nFrames = framelogprob.shape[0]
+    nStates = framelogprob.shape[1]
+    myfwdlattice[0] = framelogprob[0] + np.log(1/nStates)
+    # transmat = transmat.transpose()
+    for latticeFrameIdx in range(1,nFrames):
+        for nextState in range(nStates):
+            currentWordProbs = np.exp(myfwdlattice[latticeFrameIdx - 1])
+            priorProbOfNextState = (currentWordProbs * transmat[:, nextState]).sum()
+            posteriorProbOfNextState = priorProbOfNextState * np.exp(framelogprob[latticeFrameIdx, nextState])
+            myfwdlattice[latticeFrameIdx, nextState] = np.log(posteriorProbOfNextState)
+    return  myfwdlattice
