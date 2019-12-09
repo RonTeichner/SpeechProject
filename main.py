@@ -160,7 +160,44 @@ if enableSentenceDetection:
             sentencesEstimationResults.append(sentenceDict)
         pickle.dump(sentencesEstimationResults, open(path2SentencesResults, "wb"))
 
+nSentences = len(sentencesEstimationResults)
+classCategories = ['word', 'gender', 'speaker']
+collectedFirstWordSentenceResults = dict()
+for estimationClass in classCategories:
+    collectedFirstWordSentenceResults[estimationClass] = dict()
+    firstDigit_filtering, firstDigit_smoothing = np.zeros(nSentences), np.zeros(nSentences)
+    for sentenceIdx in range(nSentences):
+        sentenceResult = sentencesEstimationResults[sentenceIdx]
+        if estimationClass == 'word':
+            trueFirstDigit = sentenceResult['groundTruth']['Digits'][0]
+            firstDigit_filtering[sentenceIdx] = sentenceResult['results'][estimationClass]['filtering'][0][trueFirstDigit]
+            firstDigit_smoothing[sentenceIdx] = sentenceResult['results'][estimationClass]['smoothing'][0][trueFirstDigit]
+        elif estimationClass == 'gender':
+            trueGender = sentenceResult['groundTruth']['SpeakerGender']
+            if trueGender == 'male':
+                trueGenderIdx = maleIdx
+            else:
+                trueGenderIdx = femaleIdx
+            firstDigit_filtering[sentenceIdx] = sentenceResult['results'][estimationClass]['filtering'][0][trueGenderIdx]
+            firstDigit_smoothing[sentenceIdx] = sentenceResult['results'][estimationClass]['smoothing'][0][trueGenderIdx]
+        elif estimationClass == 'speaker':
+            trueSpeakerNo = int(sentenceResult['groundTruth']['SpeakerNo']) - 1
+            firstDigit_filtering[sentenceIdx] = sentenceResult['results'][estimationClass]['filtering'][0][trueSpeakerNo]
+            firstDigit_smoothing[sentenceIdx] = sentenceResult['results'][estimationClass]['smoothing'][0][trueSpeakerNo]
+    collectedFirstWordSentenceResults[estimationClass]['filtering'] = firstDigit_filtering
+    collectedFirstWordSentenceResults[estimationClass]['smoothing'] = firstDigit_smoothing
 
+fig = plt.subplots(figsize=(16, 4))
+for plotIdx, estimationClass in enumerate(classCategories):
+    plt.subplot(1, len(classCategories), plotIdx+1)
+    n_bins = 100
+    n, bins, patches = plt.hist(collectedFirstWordSentenceResults[estimationClass]['filtering'], n_bins, density=True, histtype='step', cumulative=True, label='Filtering')
+    n, bins, patches = plt.hist(collectedFirstWordSentenceResults[estimationClass]['smoothing'], n_bins, density=True, histtype='step', cumulative=True, label='Smoothing')
+    plt.grid(True)
+    plt.legend(loc='right')
+    plt.title('likelihood CDF: ' + estimationClass)
+    plt.xlabel('likelihood')
+plt.show()
 
 
 

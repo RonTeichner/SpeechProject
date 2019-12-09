@@ -6,6 +6,7 @@ import matplotlib.pyplot as plt
 import random
 import pickle
 from hmmlearn.hmm import GMMHMM as GMMHMM
+from hmmlearn.utils import log_normalize
 from sklearn.mixture import GaussianMixture
 from copy import deepcopy
 
@@ -849,6 +850,12 @@ def computeFilteringSmoothing(models, sentence, sentenceModel):
     # probs = np.apply_along_axis(log2probs, axis=1, arr=framelogprob.copy())
     logprob, fwdlattice = sentenceModel._do_forward_pass(framelogprob)
     bwdlattice = sentenceModel._do_backward_pass(framelogprob)
+
+    # log_gamma = fwdlattice + bwdlattice
+    # logSmoothing = log_gamma.copy()
+    # logFiltering = fwdlattice.copy()
+    # log_normalize(logSmoothing, axis=1)
+    # log_normalize(logFiltering, axis=1)
     smoothing = sentenceModel._compute_posteriors(fwdlattice, bwdlattice)
     filtering = np.apply_along_axis(log2probs, axis=1, arr=fwdlattice.copy())
     '''
