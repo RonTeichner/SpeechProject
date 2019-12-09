@@ -46,7 +46,7 @@ if os.path.isfile(path2metadata):
     metadata = pickle.load(open(path2metadata, "rb"))
 else:
     metadata = AudioMNISTMetaData()
-    trainPortion, validatePortion, testPortion = 0.1, 0.1, 0.2
+    trainPortion, validatePortion, testPortion = 0.6, 0.1, 0.2
     metadata.label_train_sets(trainPortion, validatePortion, testPortion, genderEqual=False)
     pickle.dump(metadata, open(path2metadata, "wb"))
 
@@ -133,8 +133,7 @@ if enableSentenceDetection:
         wordSentenceModel = GMMHMM(n_components=nWordModels, n_mix=1, n_iter=200, covariance_type='diag').fit(np.random.randn(100, nWordModels))  # fit creates all internal variables
         wordSentenceModel.transmat_, wordSentenceModel.startprob_ = transitionMat, priorStates
 
-
-
+        # compute model estimations:
         sentencesEstimationResults = list()
         for sentenceIdx, sentence in enumerate(sentencesDatasetsFeatures):
             if sentenceIdx % 100 == 0:
@@ -149,29 +148,31 @@ if enableSentenceDetection:
             sentenceDict['results'] = dict()
 
             sentenceDict['results']['gender'] = dict()
-            sentenceDict['results']['gender']['filtering'], sentenceDict['results']['gender']['smoothing'] = computeFilteringSmoothing(genderModels, sentence, genderSentenceModel)
+            sentenceDict['results']['gender']['filtering'], sentenceDict['results']['gender']['smoothing'], sentenceDict['results']['gender']['rawFrameProbs'] = computeFilteringSmoothing(genderModels, sentence, genderSentenceModel)
 
             sentenceDict['results']['speaker'] = dict()
-            sentenceDict['results']['speaker']['filtering'], sentenceDict['results']['speaker']['smoothing'] = computeFilteringSmoothing(speakerModels, sentence, speakerSentenceModel)
+            sentenceDict['results']['speaker']['filtering'], sentenceDict['results']['speaker']['smoothing'], sentenceDict['results']['speaker']['rawFrameProbs'] = computeFilteringSmoothing(speakerModels, sentence, speakerSentenceModel)
 
             sentenceDict['results']['word'] = dict()
-            sentenceDict['results']['word']['filtering'], sentenceDict['results']['word']['smoothing'] = computeFilteringSmoothing(wordModels, sentence, wordSentenceModel)
+            sentenceDict['results']['word']['filtering'], sentenceDict['results']['word']['smoothing'], sentenceDict['results']['word']['rawFrameProbs'] = computeFilteringSmoothing(wordModels, sentence, wordSentenceModel)
 
             sentencesEstimationResults.append(sentenceDict)
         pickle.dump(sentencesEstimationResults, open(path2SentencesResults, "wb"))
 
+# convert model first-word estimations to np-arrays:
 nSentences = len(sentencesEstimationResults)
 classCategories = ['word', 'gender', 'speaker']
 collectedFirstWordSentenceResults = dict()
 for estimationClass in classCategories:
     collectedFirstWordSentenceResults[estimationClass] = dict()
-    firstDigit_filtering, firstDigit_smoothing = np.zeros(nSentences), np.zeros(nSentences)
+    firstDigit_filtering, firstDigit_smoothing, firstDigit_raw = np.zeros(nSentences), np.zeros(nSentences), np.zeros(nSentences)
     for sentenceIdx in range(nSentences):
         sentenceResult = sentencesEstimationResults[sentenceIdx]
         if estimationClass == 'word':
             trueFirstDigit = sentenceResult['groundTruth']['Digits'][0]
             firstDigit_filtering[sentenceIdx] = sentenceResult['results'][estimationClass]['filtering'][0][trueFirstDigit]
             firstDigit_smoothing[sentenceIdx] = sentenceResult['results'][estimationClass]['smoothing'][0][trueFirstDigit]
+            firstDigit_raw[sentenceIdx] = sentenceResult['results'][estimationClass]['rawFrameProbs'][0][trueFirstDigit]
         elif estimationClass == 'gender':
             trueGender = sentenceResult['groundTruth']['SpeakerGender']
             if trueGender == 'male':
@@ -180,22 +181,30 @@ for estimationClass in classCategories:
                 trueGenderIdx = femaleIdx
             firstDigit_filtering[sentenceIdx] = sentenceResult['results'][estimationClass]['filtering'][0][trueGenderIdx]
             firstDigit_smoothing[sentenceIdx] = sentenceResult['results'][estimationClass]['smoothing'][0][trueGenderIdx]
+            firstDigit_raw[sentenceIdx] = sentenceResult['results'][estimationClass]['rawFrameProbs'][0][trueGenderIdx]
         elif estimationClass == 'speaker':
             trueSpeakerNo = int(sentenceResult['groundTruth']['SpeakerNo']) - 1
             firstDigit_filtering[sentenceIdx] = sentenceResult['results'][estimationClass]['filtering'][0][trueSpeakerNo]
             firstDigit_smoothing[sentenceIdx] = sentenceResult['results'][estimationClass]['smoothing'][0][trueSpeakerNo]
+            firstDigit_raw[sentenceIdx] = sentenceResult['results'][estimationClass]['rawFrameProbs'][0][trueSpeakerNo]
+    collectedFirstWordSentenceResults[estimationClass]['rawFrameProbs'] = firstDigit_raw
     collectedFirstWordSentenceResults[estimationClass]['filtering'] = firstDigit_filtering
     collectedFirstWordSentenceResults[estimationClass]['smoothing'] = firstDigit_smoothing
 
-fig = plt.subplots(figsize=(16, 4))
+# plot first-word estimation CDFs:
+fig = plt.subplots(figsize=(24, 4))
 for plotIdx, estimationClass in enumerate(classCategories):
     plt.subplot(1, len(classCategories), plotIdx+1)
     n_bins = 100
+    n, bins, patches = plt.hist(collectedFirstWordSentenceResults[estimationClass]['rawFrameProbs'], n_bins, density=True,histtype='step', cumulative=True, label='Raw')
     n, bins, patches = plt.hist(collectedFirstWordSentenceResults[estimationClass]['filtering'], n_bins, density=True, histtype='step', cumulative=True, label='Filtering')
     n, bins, patches = plt.hist(collectedFirstWordSentenceResults[estimationClass]['smoothing'], n_bins, density=True, histtype='step', cumulative=True, label='Smoothing')
+    meanRaw = collectedFirstWordSentenceResults[estimationClass]['rawFrameProbs'].mean()
+    meanFiltering = collectedFirstWordSentenceResults[estimationClass]['filtering'].mean()
+    meanSmoothing = collectedFirstWordSentenceResults[estimationClass]['smoothing'].mean()
     plt.grid(True)
     plt.legend(loc='right')
-    plt.title('likelihood CDF: ' + estimationClass)
+    plt.title(estimationClass + ' likelihood CDF; avg(R,F,S) = (%02.0f%%,%02.0f%%,%02.0f%%)' % (meanRaw*100, meanFiltering*100, meanSmoothing*100))
     plt.xlabel('likelihood')
 plt.show()
 

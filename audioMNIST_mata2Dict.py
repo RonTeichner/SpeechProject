@@ -787,7 +787,7 @@ def createSentencesMetadata(metadata, path2SentencesMetadata, nSentences = 500):
                 i = nDigits
             else:
                 i = (nextState - currentState) % nDigits
-            transitionMat[currentState, nextState] = np.power(2.0, -i)
+            transitionMat[currentState, nextState] = np.exp(-i) # np.power(2.0, -i)
 
     for currentState in range(nDigits):
         transitionMat[currentState, :] = transitionMat[currentState, :] / transitionMat[currentState, :].sum()
@@ -853,11 +853,19 @@ def computeFilteringSmoothing(models, sentence, sentenceModel):
 
     # log_gamma = fwdlattice + bwdlattice
     # logSmoothing = log_gamma.copy()
-    # logFiltering = fwdlattice.copy()
+
     # log_normalize(logSmoothing, axis=1)
-    # log_normalize(logFiltering, axis=1)
+
     smoothing = sentenceModel._compute_posteriors(fwdlattice, bwdlattice)
-    filtering = np.apply_along_axis(log2probs, axis=1, arr=fwdlattice.copy())
+    # filtering = np.apply_along_axis(log2probs, axis=1, arr=fwdlattice.copy())
+    logFiltering = fwdlattice.copy()
+    log_normalize(logFiltering, axis=1)
+    with np.errstate(under="ignore"):
+        filtering = np.exp(logFiltering)
+
+    log_normalize(framelogprob, axis=1)
+    with np.errstate(under="ignore"):
+        rawFrameProb = np.exp(framelogprob)
     '''
     # code for verifying that the transmat is read correctly by self implementation of the forward pass:
     probs = np.random.rand(*framelogprob.shape)
@@ -865,7 +873,7 @@ def computeFilteringSmoothing(models, sentence, sentenceModel):
     _, myfwdlatticeCompare = sentenceModel._do_forward_pass(np.log(probs))
     compRes = myfwdlatticeCompare - myfwdlattice
     '''
-    return filtering, smoothing
+    return filtering, smoothing, rawFrameProb
 
 def myForwardPass(framelogprob, transmat):
     myfwdlattice = np.zeros_like(framelogprob)
