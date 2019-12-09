@@ -12,7 +12,7 @@ from copy import deepcopy
 
 
 def createAudioMNIST_metadataDict():
-    path2AudioMNIST = '/media/ront/Files/Projects/AudioMNIST/data/'
+    path2AudioMNIST = '../AudioMNIST/data/'
     audioMNIST_metadata = {
         "01": {
             "accent": "german",
