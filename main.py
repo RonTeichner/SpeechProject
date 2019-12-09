@@ -36,9 +36,9 @@ path2SentencesResults = './SentencesResults'
 nGenders = 2
 femaleIdx, maleIdx = np.arange(nGenders)
 
-enableGenderTrain = False
-enableSpeakerTrain = False
-enableWordDetection = False
+enableGenderTrain = True
+enableSpeakerTrain = True
+enableWordDetection = True
 enableSentenceDetection = True
 
 # create/load metadata:
