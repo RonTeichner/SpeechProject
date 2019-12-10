@@ -733,13 +733,13 @@ def createSpeakerWavs_Features(metadata, fs, path2SpeakerAudio, path2SpeakerFeat
 def speakerClassificationTrain(speakerDatasetsFeatures, path2SpeakerModels, type='speaker'):
     nSpeakers = len(speakerDatasetsFeatures['train'][0])
     covariance_type = 'diag'
-    nTrainIters = 5
+    nTrainIters = 2
     max_nCorrect = -np.inf
     for trainIter in range(nTrainIters):
         if type == 'speaker':
             nHmmStates, nMix = 1, 3
         elif type == 'words':
-            nHmmStates, nMix = 6, 1
+            nHmmStates, nMix = 1, 3
         speakerModels = [GMMHMM(n_components=nHmmStates, n_mix=nMix, n_iter=200, covariance_type=covariance_type) for speakerIdx in range(nSpeakers)]
         for speakerIdx in range(nSpeakers):
             lengthsVec = np.asarray(speakerDatasetsFeatures['train'][1][speakerIdx])
@@ -801,6 +801,7 @@ def createSentencesMetadata(metadata, path2SentencesMetadata, nSentences = 500):
     listOfLibraryKeys = list(metadata.metaDataDict.keys())
     sentencesMetadata = list()
     for sentenceIdx in range(nSentences):
+        print('createSentencesMetadata: starting sentence no. %d out of %d' % (sentenceIdx, nSentences))
         sentencesMetadata.append(list())
         libraryKey = random.choice(listOfLibraryKeys)
         sentenceLength = np.random.randint(low=min_nWordsPerSentence, high=max_nWordsPerSentence + 1)

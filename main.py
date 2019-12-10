@@ -36,9 +36,9 @@ path2SentencesResults = './SentencesResults'
 nGenders = 2
 femaleIdx, maleIdx = np.arange(nGenders)
 
-enableGenderTrain = True
-enableSpeakerTrain = True
-enableWordDetection = True
+enableGenderTrain = False
+enableSpeakerTrain = False
+enableWordDetection = False
 enableSentenceDetection = True
 
 # create/load metadata:
@@ -46,7 +46,7 @@ if os.path.isfile(path2metadata):
     metadata = pickle.load(open(path2metadata, "rb"))
 else:
     metadata = AudioMNISTMetaData()
-    trainPortion, validatePortion, testPortion = 0.6, 0.1, 0.2
+    trainPortion, validatePortion, testPortion = 0.1, 0.1, 0.1
     metadata.label_train_sets(trainPortion, validatePortion, testPortion, genderEqual=False)
     pickle.dump(metadata, open(path2metadata, "wb"))
 
