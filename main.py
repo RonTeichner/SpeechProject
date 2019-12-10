@@ -46,7 +46,7 @@ if os.path.isfile(path2metadata):
     metadata = pickle.load(open(path2metadata, "rb"))
 else:
     metadata = AudioMNISTMetaData()
-    trainPortion, validatePortion, testPortion = 0.1, 0.1, 0.1
+    trainPortion, validatePortion, testPortion = 0.1, 0.1, 0.4
     metadata.label_train_sets(trainPortion, validatePortion, testPortion, genderEqual=False)
     pickle.dump(metadata, open(path2metadata, "wb"))
 

@@ -815,6 +815,8 @@ def createSentencesMetadata(metadata, path2SentencesMetadata, nSentences = 500):
             while not foundTest:
                 specificDigit = list(random.choice(metadata.metaDataDict[libraryKey]['pathsDict'][digit]))
                 foundTest = specificDigit[1] == metadata.testEnum
+                #if not(foundTest):
+                    #print('digit = %d, sentenceIdx = %d, digitIdx = %d; testEnum not found' % (digit, sentenceIdx, digitIdx))
             sentencesMetadata[-1].append((digit, specificDigit[0]))
     pickle.dump([sentencesMetadata, priorStates, transitionMat], open(path2SentencesMetadata, "wb"))
     return sentencesMetadata, priorStates, transitionMat
