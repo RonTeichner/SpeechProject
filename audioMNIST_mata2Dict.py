@@ -739,7 +739,7 @@ def speakerClassificationTrain(speakerDatasetsFeatures, path2SpeakerModels, type
         if type == 'speaker':
             nHmmStates, nMix = 1, 3
         elif type == 'words':
-            nHmmStates, nMix = 1, 3
+            nHmmStates, nMix = 1, 1
         speakerModels = [GMMHMM(n_components=nHmmStates, n_mix=nMix, n_iter=200, covariance_type=covariance_type) for speakerIdx in range(nSpeakers)]
         for speakerIdx in range(nSpeakers):
             lengthsVec = np.asarray(speakerDatasetsFeatures['train'][1][speakerIdx])

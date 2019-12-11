@@ -31,7 +31,7 @@ path2SentencesMetadata = './SentencesMetadata.pt'
 path2SentencesAudio = './SentencesAudio.pt'
 path2SentencesFeatures = './SentencesFeatures.pt'
 
-path2SentencesResults = './SentencesResults'
+path2SentencesResults = './SentencesResults.pt'
 
 nGenders = 2
 femaleIdx, maleIdx = np.arange(nGenders)
