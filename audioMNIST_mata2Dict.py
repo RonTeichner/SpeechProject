@@ -8,6 +8,7 @@ import pickle
 from hmmlearn.hmm import GMMHMM as GMMHMM
 from hmmlearn.utils import log_normalize
 from sklearn.mixture import GaussianMixture
+from pysndfx import AudioEffectsChain
 from copy import deepcopy
 
 
@@ -708,7 +709,7 @@ def createSpeakerWavs_Features(metadata, fs, path2SpeakerAudio, path2SpeakerFeat
         for speakerIdx, singleSpeakerList in enumerate(speakerWavs):
             for wavIdx, wav in enumerate(singleSpeakerList):
                 if wavIdx%100 == 0:
-                    print('dataset ',dataset,' starting speaker %d feature extraction; wavIdx %d out of %d' % (speakerIdx, wavIdx, len(singleSpeakerList)))
+                    print('createSpeakerWavs_Features: dataset ',dataset,' starting speaker %d feature extraction; wavIdx %d out of %d' % (speakerIdx, wavIdx, len(singleSpeakerList)))
                 extractedFeatures = np.float32(extract_features(wav, fs))
                 wav = np.expand_dims(wav, axis=1)
                 if wavIdx == 0:
@@ -769,11 +770,11 @@ def speakerClassificationTrain(speakerDatasetsFeatures, path2SpeakerModels, type
             nCorrect += nCorrectSpeaker
             nExamples += nValExamples
             genderResults.append(speakerResult) # for future use
-            print('hmmgmm: groupIdx: %d: %d correct out of %d <=> %02.0f%%' % (speakerIdx, nCorrectSpeaker, nValExamples, nCorrectSpeaker/nValExamples*100))
+            print('speakerClassificationTrain: hmmgmm: groupIdx: %d: %d correct out of %d <=> %02.0f%%' % (speakerIdx, nCorrectSpeaker, nValExamples, nCorrectSpeaker/nValExamples*100))
         if nCorrect > max_nCorrect:
             max_nCorrect = nCorrect
             speakerModels2Save = speakerModels
-        print('best performance on validation set: %d correct out of %d <=> %02.0f%%' % (nCorrect, nExamples, nCorrect / nExamples * 100))
+        print('speakerClassificationTrain: best performance on validation set: %d correct out of %d <=> %02.0f%%' % (nCorrect, nExamples, nCorrect / nExamples * 100))
 
     pickle.dump(speakerModels2Save, open(path2SpeakerModels, "wb"))
 
@@ -821,16 +822,22 @@ def createSentencesMetadata(metadata, path2SentencesMetadata, nSentences = 500):
     pickle.dump([sentencesMetadata, priorStates, transitionMat], open(path2SentencesMetadata, "wb"))
     return sentencesMetadata, priorStates, transitionMat
 
-def createSentenceWavs_Features(sentencesMetadata, path2SentencesAudio, path2SentencesFeatures):
+def createSentenceWavs_Features(sentencesMetadata, path2SentencesAudio, path2SentencesFeatures, includeEffects=False):
+    if includeEffects:
+        fx = (AudioEffectsChain().reverb(room_scale=100, wet_gain=10, hf_damping=100, reverberance=100))
+
     sentencesAudio = deepcopy(sentencesMetadata)
     sentencesFeatures = deepcopy(sentencesMetadata)
     for sentenceIdx, sentenceMetadata in enumerate(sentencesMetadata):
         if sentenceIdx % 100 == 0:
-            print('starting sentence %d out of %d' % (sentenceIdx, len(sentencesMetadata)))
+            print('createSentenceWavs_Features: starting sentence %d out of %d' % (sentenceIdx, len(sentencesMetadata)))
         for wordIdx, wordPath in enumerate(sentenceMetadata):
             if wordIdx == 0:
                 continue
             fs, wav = wavfile.read(list(wordPath)[1])
+            if includeEffects:
+                wav = fx(wav)
+
             digit = wordPath[0]
             sentencesAudio[sentenceIdx][wordIdx] = (digit, wav)
             sentencesFeatures[sentenceIdx][wordIdx] = (digit, np.float32(extract_features(wav, fs)))
@@ -891,3 +898,115 @@ def myForwardPass(framelogprob, transmat):
             posteriorProbOfNextState = priorProbOfNextState * np.exp(framelogprob[latticeFrameIdx, nextState])
             myfwdlattice[latticeFrameIdx, nextState] = np.log(posteriorProbOfNextState)
     return  myfwdlattice
+
+def createSentencesEstimationResults(sentencesDatasetsFeatures, metadata, path2SentencesResults, path2WordModels, path2SpeakerModels, path2GenderModels, transitionMat, priorStates):
+    # load models:
+    wordModels = pickle.load(open(path2WordModels, "rb"))
+    speakerModels = pickle.load(open(path2SpeakerModels, "rb"))
+    genderModels = pickle.load(open(path2GenderModels, "rb"))
+
+    nGenderModels = len(genderModels)
+    genderSentenceModel = GMMHMM(n_components=nGenderModels, n_mix=1, n_iter=200, covariance_type='diag').fit(np.random.randn(100, nGenderModels))  # fit creates all internal variables
+    genderSentenceModel.transmat_, genderSentenceModel.startprob_ = np.eye(nGenderModels), np.ones(nGenderModels) / nGenderModels
+
+    nSpeakersModels = len(speakerModels)
+    speakerSentenceModel = GMMHMM(n_components=nSpeakersModels, n_mix=1, n_iter=200, covariance_type='diag').fit(np.random.randn(100, nSpeakersModels))  # fit creates all internal variables
+    speakerSentenceModel.transmat_, speakerSentenceModel.startprob_ = np.eye(nSpeakersModels), np.ones(nSpeakersModels) / nSpeakersModels
+
+    nWordModels = len(wordModels)
+    wordSentenceModel = GMMHMM(n_components=nWordModels, n_mix=1, n_iter=200, covariance_type='diag').fit(np.random.randn(100, nWordModels))  # fit creates all internal variables
+    wordSentenceModel.transmat_, wordSentenceModel.startprob_ = transitionMat, priorStates
+
+    # compute model estimations:
+    sentencesEstimationResults = list()
+    for sentenceIdx, sentence in enumerate(sentencesDatasetsFeatures):
+        if sentenceIdx % 100 == 0:
+            print('createSentencesEstimationResults: starting sentence %d estimation out of %d' % (sentenceIdx, len(sentencesDatasetsFeatures)))
+        sentenceDict = dict()
+        nWords = len(sentence)
+        sentenceDict['groundTruth'] = dict()
+        sentenceDict['groundTruth']['SpeakerNo'] = sentence[0]
+        sentenceDict['groundTruth']['SpeakerGender'] = metadata.metaDataDict[sentence[0]]['gender']
+        sentenceDict['groundTruth']['Digits'] = [sentence[i][0] for i in range(1, nWords)]
+
+        sentenceDict['results'] = dict()
+
+        sentenceDict['results']['gender'] = dict()
+        sentenceDict['results']['gender']['filtering'], sentenceDict['results']['gender']['smoothing'], \
+        sentenceDict['results']['gender']['rawFrameProbs'] = computeFilteringSmoothing(genderModels, sentence, genderSentenceModel)
+
+        sentenceDict['results']['speaker'] = dict()
+        sentenceDict['results']['speaker']['filtering'], sentenceDict['results']['speaker']['smoothing'], \
+        sentenceDict['results']['speaker']['rawFrameProbs'] = computeFilteringSmoothing(speakerModels, sentence, speakerSentenceModel)
+
+        sentenceDict['results']['word'] = dict()
+        sentenceDict['results']['word']['filtering'], sentenceDict['results']['word']['smoothing'], \
+        sentenceDict['results']['word']['rawFrameProbs'] = computeFilteringSmoothing(wordModels, sentence, wordSentenceModel)
+
+        sentencesEstimationResults.append(sentenceDict)
+    pickle.dump(sentencesEstimationResults, open(path2SentencesResults, "wb"))
+
+def plotSentenceResults(sentencesEstimationResults, maleIdx, femaleIdx):
+    # convert model first-word estimations to np-arrays:
+    nSentences = len(sentencesEstimationResults)
+    classCategories = ['word', 'gender', 'speaker']
+    collectedFirstWordSentenceResults = dict()
+    for estimationClass in classCategories:
+        collectedFirstWordSentenceResults[estimationClass] = dict()
+        firstDigit_filtering, firstDigit_smoothing, firstDigit_raw = np.zeros(nSentences), np.zeros(nSentences), np.zeros(nSentences)
+        for sentenceIdx in range(nSentences):
+            sentenceResult = sentencesEstimationResults[sentenceIdx]
+            if estimationClass == 'word':
+                trueFirstDigit = sentenceResult['groundTruth']['Digits'][0]
+                firstDigit_filtering[sentenceIdx] = sentenceResult['results'][estimationClass]['filtering'][0][trueFirstDigit]
+                firstDigit_smoothing[sentenceIdx] = sentenceResult['results'][estimationClass]['smoothing'][0][trueFirstDigit]
+                firstDigit_raw[sentenceIdx] = sentenceResult['results'][estimationClass]['rawFrameProbs'][0][trueFirstDigit]
+            elif estimationClass == 'gender':
+                trueGender = sentenceResult['groundTruth']['SpeakerGender']
+                if trueGender == 'male':
+                    trueGenderIdx = maleIdx
+                else:
+                    trueGenderIdx = femaleIdx
+                firstDigit_filtering[sentenceIdx] = sentenceResult['results'][estimationClass]['filtering'][0][trueGenderIdx]
+                firstDigit_smoothing[sentenceIdx] = sentenceResult['results'][estimationClass]['smoothing'][0][trueGenderIdx]
+                firstDigit_raw[sentenceIdx] = sentenceResult['results'][estimationClass]['rawFrameProbs'][0][trueGenderIdx]
+            elif estimationClass == 'speaker':
+                trueSpeakerNo = int(sentenceResult['groundTruth']['SpeakerNo']) - 1
+                firstDigit_filtering[sentenceIdx] = sentenceResult['results'][estimationClass]['filtering'][0][trueSpeakerNo]
+                firstDigit_smoothing[sentenceIdx] = sentenceResult['results'][estimationClass]['smoothing'][0][trueSpeakerNo]
+                firstDigit_raw[sentenceIdx] = sentenceResult['results'][estimationClass]['rawFrameProbs'][0][trueSpeakerNo]
+        collectedFirstWordSentenceResults[estimationClass]['rawFrameProbs'] = firstDigit_raw
+        collectedFirstWordSentenceResults[estimationClass]['filtering'] = firstDigit_filtering
+        collectedFirstWordSentenceResults[estimationClass]['smoothing'] = firstDigit_smoothing
+
+    # plot first-word estimation CDFs:
+    fig = plt.subplots(figsize=(24, 10))
+    for plotIdx, estimationClass in enumerate(classCategories):
+        plt.subplot(2, len(classCategories), plotIdx + 1)
+        n_bins = 100
+        #n, bins, patches = plt.hist(collectedFirstWordSentenceResults[estimationClass]['rawFrameProbs'], n_bins, density=True, histtype='step', cumulative=True, label='Raw')
+        n, bins, patches = plt.hist(collectedFirstWordSentenceResults[estimationClass]['filtering'], n_bins, density=True, histtype='step', cumulative=True, label='Filtering')
+        n, bins, patches = plt.hist(collectedFirstWordSentenceResults[estimationClass]['smoothing'], n_bins, density=True, histtype='step', cumulative=True, label='Smoothing')
+        #meanRaw = collectedFirstWordSentenceResults[estimationClass]['rawFrameProbs'].mean()
+        meanFiltering = collectedFirstWordSentenceResults[estimationClass]['filtering'].mean()
+        meanSmoothing = collectedFirstWordSentenceResults[estimationClass]['smoothing'].mean()
+        plt.grid(True)
+        plt.legend(loc='right')
+        #plt.title(estimationClass + ' likelihood CDF; avg(R,F,S) = (%02.0f%%,%02.0f%%,%02.0f%%)' % (meanRaw * 100, meanFiltering * 100, meanSmoothing * 100))
+        plt.title(estimationClass + ' likelihood CDF; avg(F,S) = (%02.0f%%,%02.0f%%)' % (meanFiltering * 100, meanSmoothing * 100))
+        plt.xlabel('likelihood')
+
+        plt.subplot(2, len(classCategories), plotIdx + 1 + len(classCategories))
+        n_bins = 100
+        # n, bins, patches = plt.hist(collectedFirstWordSentenceResults[estimationClass]['rawFrameProbs'], n_bins, density=True, histtype='step', cumulative=True, label='Raw')
+        n, bins, patches = plt.hist(collectedFirstWordSentenceResults[estimationClass]['filtering'], n_bins, density=True, histtype='step', cumulative=False, label='Filtering')
+        n, bins, patches = plt.hist(collectedFirstWordSentenceResults[estimationClass]['smoothing'], n_bins, density=True, histtype='step', cumulative=False, label='Smoothing')
+        # meanRaw = collectedFirstWordSentenceResults[estimationClass]['rawFrameProbs'].mean()
+        meanFiltering = collectedFirstWordSentenceResults[estimationClass]['filtering'].mean()
+        meanSmoothing = collectedFirstWordSentenceResults[estimationClass]['smoothing'].mean()
+        plt.grid(True)
+        plt.legend(loc='right')
+        # plt.title(estimationClass + ' likelihood CDF; avg(R,F,S) = (%02.0f%%,%02.0f%%,%02.0f%%)' % (meanRaw * 100, meanFiltering * 100, meanSmoothing * 100))
+        plt.title(estimationClass + ' likelihood histogram; avg(F,S) = (%02.0f%%,%02.0f%%)' % (meanFiltering * 100, meanSmoothing * 100))
+        plt.xlabel('likelihood')
+    plt.show()
