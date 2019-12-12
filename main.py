@@ -45,7 +45,7 @@ femaleIdx, maleIdx = np.arange(nGenders)
 
 enableGenderTrain = False
 enableSpeakerTrain = False
-enableWordDetection = False
+enableWordDetection = True
 enableSentenceDetection = True
 
 enablePureSentenceTest = True
@@ -108,7 +108,7 @@ if enableWordDetection:
     if os.path.isfile(path2WordModels):
         wordModels = pickle.load(open(path2WordModels, "rb"))
     else:
-        speakerClassificationTrain(wordDatasetsFeatures, path2WordModels, 'words')
+        wordModels = speakerClassificationTrain(wordDatasetsFeatures, path2WordModels, 'words', trainOnLessFeatures=True)
 
 if enableSentenceDetection:
     if os.path.isfile(path2SentencesResults):
@@ -134,7 +134,7 @@ if enableSentenceDetection:
         if os.path.isfile(path2SentencesResults):
             sentencesEstimationResults = pickle.load(open(path2SentencesResults, "rb"))
         else:
-            sentencesEstimationResults = createSentencesEstimationResults(sentencesDatasetsFeatures, metadata, path2SentencesResults, path2WordModels, path2SpeakerModels, path2GenderModels, transitionMat, priorStates)
+            sentencesEstimationResults = createSentencesEstimationResults(sentencesDatasetsFeatures, metadata, path2SentencesResults, path2WordModels, path2SpeakerModels, path2GenderModels, transitionMat, priorStates, trainOnLessFeatures=True, enableMahalanobisCala=True)
 
 if enablePureSentencePlots:
     sentencesEstimationResults = pickle.load(open(path2SentencesResults, "rb"))
@@ -155,7 +155,7 @@ if enableSentencePostEffectFeaturesCreation:
         sentencesPostEffectsEstimationResults = pickle.load(open(path2SentencesPostEffectsResults, "rb"))
     else:
         metadata = pickle.load(open(path2metadata, "rb"))
-        sentencesPostEffectsEstimationResults = createSentencesEstimationResults(sentencesDatasetsPostEffectsFeatures, metadata, path2SentencesPostEffectsResults, path2WordModels, path2SpeakerModels, path2GenderModels, transitionMat, priorStates)
+        sentencesPostEffectsEstimationResults = createSentencesEstimationResults(sentencesDatasetsPostEffectsFeatures, metadata, path2SentencesPostEffectsResults, path2WordModels, path2SpeakerModels, path2GenderModels, transitionMat, priorStates, trainOnLessFeatures=True, enableMahalanobisCala=True)
 
 if enableEffectSentencePlots:
     sentencesPostEffectsEstimationResults = pickle.load(open(path2SentencesPostEffectsResults, "rb"))

@@ -1,6 +1,7 @@
 import os
 import numpy as np
 from scipy.io import wavfile
+from scipy.spatial.distance import mahalanobis as calcMahalanobis
 from speakerfeatures import *
 import matplotlib.pyplot as plt
 import random
@@ -731,7 +732,7 @@ def createSpeakerWavs_Features(metadata, fs, path2SpeakerAudio, path2SpeakerFeat
     return speakerDatasetsFeatures
 
 
-def speakerClassificationTrain(speakerDatasetsFeatures, path2SpeakerModels, type='speaker'):
+def speakerClassificationTrain(speakerDatasetsFeatures, path2SpeakerModels, type='speaker', trainOnLessFeatures=False):
     nSpeakers = len(speakerDatasetsFeatures['train'][0])
     covariance_type = 'diag'
     nTrainIters = 2
@@ -747,7 +748,10 @@ def speakerClassificationTrain(speakerDatasetsFeatures, path2SpeakerModels, type
             if nHmmStates == 1:
                 # empirically, train results are better with all the gender signals collapsed to a single signal
                 lengthsVec = np.expand_dims(lengthsVec.sum(), axis=0)
-            speakerModels[speakerIdx].fit(speakerDatasetsFeatures['train'][0][speakerIdx], lengths=lengthsVec)
+            if trainOnLessFeatures:
+                speakerModels[speakerIdx].fit(limitFeatures(speakerDatasetsFeatures['train'][0][speakerIdx]), lengths=lengthsVec)
+            else:
+                speakerModels[speakerIdx].fit(speakerDatasetsFeatures['train'][0][speakerIdx], lengths=lengthsVec)
 
         # validation:
         datasetKey = 'validate'
@@ -762,6 +766,8 @@ def speakerClassificationTrain(speakerDatasetsFeatures, path2SpeakerModels, type
                 singleValLength = speakerDatasetsFeatures[datasetKey][1][speakerIdx][singleValIdx]
                 stopIdx = startIdx + singleValLength
                 wavFeatures = speakerDatasetsFeatures[datasetKey][0][speakerIdx][startIdx:stopIdx]
+                if trainOnLessFeatures:
+                    wavFeatures = limitFeatures(wavFeatures)
                 for modelIdx in range(nSpeakers):
                     speakerResult[singleValIdx, modelIdx] = speakerModels[modelIdx].score(wavFeatures)
                 startIdx += singleValLength
@@ -777,6 +783,7 @@ def speakerClassificationTrain(speakerDatasetsFeatures, path2SpeakerModels, type
         print('speakerClassificationTrain: best performance on validation set: %d correct out of %d <=> %02.0f%%' % (nCorrect, nExamples, nCorrect / nExamples * 100))
 
     pickle.dump(speakerModels2Save, open(path2SpeakerModels, "wb"))
+    return speakerModels2Save
 
 def createSentencesMetadata(metadata, path2SentencesMetadata, nSentences = 500):
     # create sentence transitionMat:
@@ -850,16 +857,30 @@ def log2probs(logProbs):
     probs = np.exp(np.maximum(logProbs, -30)) # setting min value of -30 for log-values
     return probs / probs.sum()
 
-def computeFilteringSmoothing(models, sentence, sentenceModel):
-    nModels, nFrames = len(models), len(sentence)-1
-    framelogprob = np.zeros([nFrames, nModels])
-    for frameIdx in range(nFrames):
+def computeFilteringSmoothing(models, sentence, sentenceModel, trainOnLessFeatures=False, enableMahalanobisCala=False):
+    nModels, nWords = len(models), len(sentence)-1
+    wordlogprob = np.zeros([nWords, nModels])
+    mahalanobis = list()
+    for wordIdx in range(nWords):
+        wordFeatures = sentence[wordIdx + 1][1]
         for modelIdx in range(nModels):
-            framelogprob[frameIdx, modelIdx] = models[modelIdx].score(sentence[frameIdx+1][1])
+            if trainOnLessFeatures:
+                wordFeatures = limitFeatures(wordFeatures)
+            wordlogprob[wordIdx, modelIdx] = models[modelIdx].score(wordFeatures)
+        if enableMahalanobisCala:
+            nFrames, nFeatures, nMix = wordFeatures.shape[0], models[0].means_.shape[2], models[0].means_.shape[1]
+            if nMix == 1:
+                mahalanobisDist = np.zeros([nFrames, nModels, nFeatures])
+                for frameIdx in range(nFrames):
+                    for modelIdx in range(nModels):
+                        for featureIdx in range(nFeatures):
+                            mahalanobisDist[frameIdx, modelIdx, featureIdx] = calcMahalanobis(wordFeatures[frameIdx, featureIdx], models[modelIdx].means_[0, 0, featureIdx], 1/models[modelIdx].covars_[0, 0, featureIdx])
+                mahalanobis.append(mahalanobisDist)
 
-    # probs = np.apply_along_axis(log2probs, axis=1, arr=framelogprob.copy())
-    logprob, fwdlattice = sentenceModel._do_forward_pass(framelogprob)
-    bwdlattice = sentenceModel._do_backward_pass(framelogprob)
+
+    # probs = np.apply_along_axis(log2probs, axis=1, arr=wordlogprob.copy())
+    logprob, fwdlattice = sentenceModel._do_forward_pass(wordlogprob)
+    bwdlattice = sentenceModel._do_backward_pass(wordlogprob)
 
     # log_gamma = fwdlattice + bwdlattice
     # logSmoothing = log_gamma.copy()
@@ -873,9 +894,9 @@ def computeFilteringSmoothing(models, sentence, sentenceModel):
     with np.errstate(under="ignore"):
         filtering = np.exp(logFiltering)
 
-    log_normalize(framelogprob, axis=1)
-    with np.errstate(under="ignore"):
-        rawFrameProb = np.exp(framelogprob)
+    log_normalize(wordlogprob, axis=1)
+    #with np.errstate(under="ignore"):
+        #rawFrameProb = np.exp(framelogprob)
     '''
     # code for verifying that the transmat is read correctly by self implementation of the forward pass:
     probs = np.random.rand(*framelogprob.shape)
@@ -883,7 +904,7 @@ def computeFilteringSmoothing(models, sentence, sentenceModel):
     _, myfwdlatticeCompare = sentenceModel._do_forward_pass(np.log(probs))
     compRes = myfwdlatticeCompare - myfwdlattice
     '''
-    return filtering, smoothing, rawFrameProb
+    return filtering, smoothing, mahalanobis
 
 def myForwardPass(framelogprob, transmat):
     myfwdlattice = np.zeros_like(framelogprob)
@@ -899,7 +920,7 @@ def myForwardPass(framelogprob, transmat):
             myfwdlattice[latticeFrameIdx, nextState] = np.log(posteriorProbOfNextState)
     return  myfwdlattice
 
-def createSentencesEstimationResults(sentencesDatasetsFeatures, metadata, path2SentencesResults, path2WordModels, path2SpeakerModels, path2GenderModels, transitionMat, priorStates):
+def createSentencesEstimationResults(sentencesDatasetsFeatures, metadata, path2SentencesResults, path2WordModels, path2SpeakerModels, path2GenderModels, transitionMat, priorStates, trainOnLessFeatures=False, enableMahalanobisCala=False):
     # load models:
     wordModels = pickle.load(open(path2WordModels, "rb"))
     speakerModels = pickle.load(open(path2SpeakerModels, "rb"))
@@ -932,16 +953,13 @@ def createSentencesEstimationResults(sentencesDatasetsFeatures, metadata, path2S
         sentenceDict['results'] = dict()
 
         sentenceDict['results']['gender'] = dict()
-        sentenceDict['results']['gender']['filtering'], sentenceDict['results']['gender']['smoothing'], \
-        sentenceDict['results']['gender']['rawFrameProbs'] = computeFilteringSmoothing(genderModels, sentence, genderSentenceModel)
+        sentenceDict['results']['gender']['filtering'], sentenceDict['results']['gender']['smoothing'], sentenceDict['results']['gender']['mahalanobis'] = computeFilteringSmoothing(genderModels, sentence, genderSentenceModel, trainOnLessFeatures=False, enableMahalanobisCala=False)
 
         sentenceDict['results']['speaker'] = dict()
-        sentenceDict['results']['speaker']['filtering'], sentenceDict['results']['speaker']['smoothing'], \
-        sentenceDict['results']['speaker']['rawFrameProbs'] = computeFilteringSmoothing(speakerModels, sentence, speakerSentenceModel)
+        sentenceDict['results']['speaker']['filtering'], sentenceDict['results']['speaker']['smoothing'], sentenceDict['results']['speaker']['mahalanobis'] = computeFilteringSmoothing(speakerModels, sentence, speakerSentenceModel, trainOnLessFeatures=False, enableMahalanobisCala=False)
 
         sentenceDict['results']['word'] = dict()
-        sentenceDict['results']['word']['filtering'], sentenceDict['results']['word']['smoothing'], \
-        sentenceDict['results']['word']['rawFrameProbs'] = computeFilteringSmoothing(wordModels, sentence, wordSentenceModel)
+        sentenceDict['results']['word']['filtering'], sentenceDict['results']['word']['smoothing'], sentenceDict['results']['word']['mahalanobis'] = computeFilteringSmoothing(wordModels, sentence, wordSentenceModel, trainOnLessFeatures, enableMahalanobisCala)
 
         sentencesEstimationResults.append(sentenceDict)
     pickle.dump(sentencesEstimationResults, open(path2SentencesResults, "wb"))
@@ -960,7 +978,6 @@ def plotSentenceResults(sentencesEstimationResults, maleIdx, femaleIdx):
                 trueFirstDigit = sentenceResult['groundTruth']['Digits'][0]
                 firstDigit_filtering[sentenceIdx] = sentenceResult['results'][estimationClass]['filtering'][0][trueFirstDigit]
                 firstDigit_smoothing[sentenceIdx] = sentenceResult['results'][estimationClass]['smoothing'][0][trueFirstDigit]
-                firstDigit_raw[sentenceIdx] = sentenceResult['results'][estimationClass]['rawFrameProbs'][0][trueFirstDigit]
             elif estimationClass == 'gender':
                 trueGender = sentenceResult['groundTruth']['SpeakerGender']
                 if trueGender == 'male':
@@ -969,13 +986,10 @@ def plotSentenceResults(sentencesEstimationResults, maleIdx, femaleIdx):
                     trueGenderIdx = femaleIdx
                 firstDigit_filtering[sentenceIdx] = sentenceResult['results'][estimationClass]['filtering'][0][trueGenderIdx]
                 firstDigit_smoothing[sentenceIdx] = sentenceResult['results'][estimationClass]['smoothing'][0][trueGenderIdx]
-                firstDigit_raw[sentenceIdx] = sentenceResult['results'][estimationClass]['rawFrameProbs'][0][trueGenderIdx]
             elif estimationClass == 'speaker':
                 trueSpeakerNo = int(sentenceResult['groundTruth']['SpeakerNo']) - 1
                 firstDigit_filtering[sentenceIdx] = sentenceResult['results'][estimationClass]['filtering'][0][trueSpeakerNo]
-                firstDigit_smoothing[sentenceIdx] = sentenceResult['results'][estimationClass]['smoothing'][0][trueSpeakerNo]
-                firstDigit_raw[sentenceIdx] = sentenceResult['results'][estimationClass]['rawFrameProbs'][0][trueSpeakerNo]
-        collectedFirstWordSentenceResults[estimationClass]['rawFrameProbs'] = firstDigit_raw
+                firstDigit_smoothing[sentenceIdx] = sentenceResult['results'][estimationClass]['smoothing'][0][trueSpeakerNo]                        
         collectedFirstWordSentenceResults[estimationClass]['filtering'] = firstDigit_filtering
         collectedFirstWordSentenceResults[estimationClass]['smoothing'] = firstDigit_smoothing
 
@@ -984,10 +998,10 @@ def plotSentenceResults(sentencesEstimationResults, maleIdx, femaleIdx):
     for plotIdx, estimationClass in enumerate(classCategories):
         plt.subplot(2, len(classCategories), plotIdx + 1)
         n_bins = 100
-        #n, bins, patches = plt.hist(collectedFirstWordSentenceResults[estimationClass]['rawFrameProbs'], n_bins, density=True, histtype='step', cumulative=True, label='Raw')
+        #n, bins, patches = plt.hist(collectedFirstWordSentenceResults[estimationClass]['rawFrameMahalanobis'], n_bins, density=True, histtype='step', cumulative=True, label='Raw')
         n, bins, patches = plt.hist(collectedFirstWordSentenceResults[estimationClass]['filtering'], n_bins, density=True, histtype='step', cumulative=True, label='Filtering')
         n, bins, patches = plt.hist(collectedFirstWordSentenceResults[estimationClass]['smoothing'], n_bins, density=True, histtype='step', cumulative=True, label='Smoothing')
-        #meanRaw = collectedFirstWordSentenceResults[estimationClass]['rawFrameProbs'].mean()
+        #meanRaw = collectedFirstWordSentenceResults[estimationClass]['rawFrameMahalanobis'].mean()
         meanFiltering = collectedFirstWordSentenceResults[estimationClass]['filtering'].mean()
         meanSmoothing = collectedFirstWordSentenceResults[estimationClass]['smoothing'].mean()
         plt.grid(True)
@@ -997,11 +1011,11 @@ def plotSentenceResults(sentencesEstimationResults, maleIdx, femaleIdx):
         plt.xlabel('likelihood')
 
         plt.subplot(2, len(classCategories), plotIdx + 1 + len(classCategories))
-        n_bins = 100
-        # n, bins, patches = plt.hist(collectedFirstWordSentenceResults[estimationClass]['rawFrameProbs'], n_bins, density=True, histtype='step', cumulative=True, label='Raw')
+        n_bins = 20
+        # n, bins, patches = plt.hist(collectedFirstWordSentenceResults[estimationClass]['rawFrameMahalanobis'], n_bins, density=True, histtype='step', cumulative=True, label='Raw')
         n, bins, patches = plt.hist(collectedFirstWordSentenceResults[estimationClass]['filtering'], n_bins, density=True, histtype='step', cumulative=False, label='Filtering')
         n, bins, patches = plt.hist(collectedFirstWordSentenceResults[estimationClass]['smoothing'], n_bins, density=True, histtype='step', cumulative=False, label='Smoothing')
-        # meanRaw = collectedFirstWordSentenceResults[estimationClass]['rawFrameProbs'].mean()
+        # meanRaw = collectedFirstWordSentenceResults[estimationClass]['rawFrameMahalanobis'].mean()
         meanFiltering = collectedFirstWordSentenceResults[estimationClass]['filtering'].mean()
         meanSmoothing = collectedFirstWordSentenceResults[estimationClass]['smoothing'].mean()
         plt.grid(True)
@@ -1010,3 +1024,6 @@ def plotSentenceResults(sentencesEstimationResults, maleIdx, femaleIdx):
         plt.title(estimationClass + ' likelihood histogram; avg(F,S) = (%02.0f%%,%02.0f%%)' % (meanFiltering * 100, meanSmoothing * 100))
         plt.xlabel('likelihood')
     plt.show()
+
+def limitFeatures(inputFeatures):
+    return inputFeatures[:, :13]
