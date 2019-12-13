@@ -1,4 +1,4 @@
-dfrom audioMNIST_mata2Dict import *
+from audioMNIST_mata2Dict import *
 from speakerfeatures import *
 import matplotlib.pyplot as plt
 from scipy.io import wavfile
@@ -72,13 +72,13 @@ if enableGenderTrain:
         genderDatasetsFeatures = pickle.load(open(path2GenderFeatures, "rb"))
         #genderDatasetsAudio = pickle.load(open(path2GenderAudio, "rb"))
     else:
-        genderDatasetsFeatures = createSpeakerWavs_Features(metadata, fs, path2GenderAudio, path2GenderFeatures, 'genders')
+        genderDatasetsFeatures = createcategoryWavs_Features(metadata, fs, path2GenderAudio, path2GenderFeatures, 'genders')
 
     # train gender detection:
     if os.path.isfile(path2GenderModels):
         genderModels = pickle.load(open(path2GenderModels, "rb"))
     else:
-        speakerClassificationTrain(genderDatasetsFeatures, path2GenderModels)
+        categoryClassificationTrain(genderDatasetsFeatures, path2GenderModels)
 
 if enableSpeakerTrain:
     # create\load speakers features:
@@ -86,13 +86,13 @@ if enableSpeakerTrain:
         speakerDatasetsFeatures = pickle.load(open(path2SpeakerFeatures, "rb"))
         # speakerDatasetsAudio = pickle.load(open(path2SpeakerAudio, "rb"))
     else:
-        speakerDatasetsFeatures = createSpeakerWavs_Features(metadata, fs, path2SpeakerAudio, path2SpeakerFeatures, 'speakers')
+        speakerDatasetsFeatures = createcategoryWavs_Features(metadata, fs, path2SpeakerAudio, path2SpeakerFeatures, 'speakers')
 
     # train speakers detection:
     if os.path.isfile(path2SpeakerModels):
         speakerModels = pickle.load(open(path2SpeakerModels, "rb"))
     else:
-        speakerClassificationTrain(speakerDatasetsFeatures, path2SpeakerModels)
+        categoryClassificationTrain(speakerDatasetsFeatures, path2SpeakerModels)
 
 if enableWordDetection:
     # create\load speakers features:
@@ -102,13 +102,13 @@ if enableWordDetection:
         # sd.play(speakerDatasetsAudio['test'][0][0],fs)
         # sd.stop()
     else:
-        wordDatasetsFeatures = createSpeakerWavs_Features(metadata, fs, path2WordAudio, path2WordFeatures, 'words')
+        wordDatasetsFeatures = createcategoryWavs_Features(metadata, fs, path2WordAudio, path2WordFeatures, 'words')
 
     # train speakers detection:
     if os.path.isfile(path2WordModels):
         wordModels = pickle.load(open(path2WordModels, "rb"))
     else:
-        wordModels = speakerClassificationTrain(wordDatasetsFeatures, path2WordModels, 'words', trainOnLessFeatures=True)
+        wordModels = categoryClassificationTrain(wordDatasetsFeatures, path2WordModels, 'words', trainOnLessFeatures=True)
 
 if enableSentenceDetection:
     if os.path.isfile(path2SentencesResults):
@@ -161,4 +161,4 @@ if enableEffectSentencePlots:
     sentencesPostEffectsEstimationResults = pickle.load(open(path2SentencesPostEffectsResults, "rb"))
     plotSentenceResults(sentencesPostEffectsEstimationResults, maleIdx, femaleIdx)
 
-x=3
+wordFeatureHistograms(path2WordFeatures)

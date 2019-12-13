@@ -692,48 +692,48 @@ class AudioMNISTMetaData:
                     nFemales += nFilesInDir
         return nMales, nFemales
 
-def createSpeakerWavs_Features(metadata, fs, path2SpeakerAudio, path2SpeakerFeatures, type):
-    speakerDatasetsAudio = dict()
-    speakerDatasetsFeatures = dict()
+def createcategoryWavs_Features(metadata, fs, path2categoryAudio, path2categoryFeatures, type):
+    categoryDatasetsAudio = dict()
+    categoryDatasetsFeatures = dict()
     for dataset in ['train', 'validate', 'test']:
         if type == 'speakers':
-            speakerWavs = metadata.get_speaker_set(dataset)
+            categoryWavs = metadata.get_speaker_set(dataset)
         elif type == 'genders':
-            speakerWavs = metadata.get_gender_set(dataset)
+            categoryWavs = metadata.get_gender_set(dataset)
         elif type == 'words':
-            speakerWavs = metadata.get_word_set(dataset)
+            categoryWavs = metadata.get_word_set(dataset)
 
-        speakerAudio = list(range(len(speakerWavs)))
-        speakerAudioLengths = list(range(len(speakerWavs)))
-        speakerFeatures = list(range(len(speakerWavs)))
-        speakerFeaturesLengths = list(range(len(speakerWavs)))
-        for speakerIdx, singleSpeakerList in enumerate(speakerWavs):
-            for wavIdx, wav in enumerate(singleSpeakerList):
+        categoryAudio = list(range(len(categoryWavs)))
+        categoryAudioLengths = list(range(len(categoryWavs)))
+        categoryFeatures = list(range(len(categoryWavs)))
+        categoryFeaturesLengths = list(range(len(categoryWavs)))
+        for categoryIdx, singlecategoryList in enumerate(categoryWavs):
+            for wavIdx, wav in enumerate(singlecategoryList):
                 if wavIdx%100 == 0:
-                    print('createSpeakerWavs_Features: dataset ',dataset,' starting speaker %d feature extraction; wavIdx %d out of %d' % (speakerIdx, wavIdx, len(singleSpeakerList)))
+                    print('createcategoryWavs_Features: dataset ',dataset,' starting category %d feature extraction; wavIdx %d out of %d' % (categoryIdx, wavIdx, len(singlecategoryList)))
                 extractedFeatures = np.float32(extract_features(wav, fs))
                 wav = np.expand_dims(wav, axis=1)
                 if wavIdx == 0:
-                    speakerAudio[speakerIdx] = wav
-                    speakerAudioLengths[speakerIdx] = list()
-                    speakerFeatures[speakerIdx] = extractedFeatures
-                    speakerFeaturesLengths[speakerIdx] = list()
+                    categoryAudio[categoryIdx] = wav
+                    categoryAudioLengths[categoryIdx] = list()
+                    categoryFeatures[categoryIdx] = extractedFeatures
+                    categoryFeaturesLengths[categoryIdx] = list()
                 else:
-                    speakerAudio[speakerIdx] = np.vstack((speakerAudio[speakerIdx], wav))
-                    speakerFeatures[speakerIdx] = np.vstack((speakerFeatures[speakerIdx], extractedFeatures))
-                speakerAudioLengths[speakerIdx].append(wav.shape[0])
-                speakerFeaturesLengths[speakerIdx].append(extractedFeatures.shape[0])
-        speakerAudioList = [speakerAudio, speakerAudioLengths]
-        speakerFeaturesList = [speakerFeatures, speakerFeaturesLengths]
-        speakerDatasetsAudio[dataset] = speakerAudioList
-        speakerDatasetsFeatures[dataset] = speakerFeaturesList
-    pickle.dump(speakerDatasetsAudio, open(path2SpeakerAudio, "wb"))
-    pickle.dump(speakerDatasetsFeatures, open(path2SpeakerFeatures, "wb"))
-    return speakerDatasetsFeatures
+                    categoryAudio[categoryIdx] = np.vstack((categoryAudio[categoryIdx], wav))
+                    categoryFeatures[categoryIdx] = np.vstack((categoryFeatures[categoryIdx], extractedFeatures))
+                categoryAudioLengths[categoryIdx].append(wav.shape[0])
+                categoryFeaturesLengths[categoryIdx].append(extractedFeatures.shape[0])
+        categoryAudioList = [categoryAudio, categoryAudioLengths]
+        categoryFeaturesList = [categoryFeatures, categoryFeaturesLengths]
+        categoryDatasetsAudio[dataset] = categoryAudioList
+        categoryDatasetsFeatures[dataset] = categoryFeaturesList
+    pickle.dump(categoryDatasetsAudio, open(path2categoryAudio, "wb"))
+    pickle.dump(categoryDatasetsFeatures, open(path2categoryFeatures, "wb"))
+    return categoryDatasetsFeatures
 
 
-def speakerClassificationTrain(speakerDatasetsFeatures, path2SpeakerModels, type='speaker', trainOnLessFeatures=False):
-    nSpeakers = len(speakerDatasetsFeatures['train'][0])
+def categoryClassificationTrain(categoryDatasetsFeatures, path2categoryModels, type='speaker', trainOnLessFeatures=False):
+    ncategorys = len(categoryDatasetsFeatures['train'][0])
     covariance_type = 'diag'
     nTrainIters = 2
     max_nCorrect = -np.inf
@@ -742,48 +742,48 @@ def speakerClassificationTrain(speakerDatasetsFeatures, path2SpeakerModels, type
             nHmmStates, nMix = 1, 3
         elif type == 'words':
             nHmmStates, nMix = 1, 1
-        speakerModels = [GMMHMM(n_components=nHmmStates, n_mix=nMix, n_iter=200, covariance_type=covariance_type) for speakerIdx in range(nSpeakers)]
-        for speakerIdx in range(nSpeakers):
-            lengthsVec = np.asarray(speakerDatasetsFeatures['train'][1][speakerIdx])
+        categoryModels = [GMMHMM(n_components=nHmmStates, n_mix=nMix, n_iter=200, covariance_type=covariance_type) for categoryIdx in range(ncategorys)]
+        for categoryIdx in range(ncategorys):
+            lengthsVec = np.asarray(categoryDatasetsFeatures['train'][1][categoryIdx])
             if nHmmStates == 1:
                 # empirically, train results are better with all the gender signals collapsed to a single signal
                 lengthsVec = np.expand_dims(lengthsVec.sum(), axis=0)
             if trainOnLessFeatures:
-                speakerModels[speakerIdx].fit(limitFeatures(speakerDatasetsFeatures['train'][0][speakerIdx]), lengths=lengthsVec)
+                categoryModels[categoryIdx].fit(limitFeatures(categoryDatasetsFeatures['train'][0][categoryIdx]), lengths=lengthsVec)
             else:
-                speakerModels[speakerIdx].fit(speakerDatasetsFeatures['train'][0][speakerIdx], lengths=lengthsVec)
+                categoryModels[categoryIdx].fit(categoryDatasetsFeatures['train'][0][categoryIdx], lengths=lengthsVec)
 
         # validation:
         datasetKey = 'validate'
         nCorrect = 0
         nExamples = 0
         genderResults = list()
-        for speakerIdx in range(nSpeakers):
-            nValExamples = np.asarray(speakerDatasetsFeatures[datasetKey][1][speakerIdx]).shape[0]
-            speakerResult = np.zeros((nValExamples, nSpeakers))
+        for categoryIdx in range(ncategorys):
+            nValExamples = np.asarray(categoryDatasetsFeatures[datasetKey][1][categoryIdx]).shape[0]
+            categoryResult = np.zeros((nValExamples, ncategorys))
             startIdx = 0
             for singleValIdx in range(nValExamples):
-                singleValLength = speakerDatasetsFeatures[datasetKey][1][speakerIdx][singleValIdx]
+                singleValLength = categoryDatasetsFeatures[datasetKey][1][categoryIdx][singleValIdx]
                 stopIdx = startIdx + singleValLength
-                wavFeatures = speakerDatasetsFeatures[datasetKey][0][speakerIdx][startIdx:stopIdx]
+                wavFeatures = categoryDatasetsFeatures[datasetKey][0][categoryIdx][startIdx:stopIdx]
                 if trainOnLessFeatures:
                     wavFeatures = limitFeatures(wavFeatures)
-                for modelIdx in range(nSpeakers):
-                    speakerResult[singleValIdx, modelIdx] = speakerModels[modelIdx].score(wavFeatures)
+                for modelIdx in range(ncategorys):
+                    categoryResult[singleValIdx, modelIdx] = categoryModels[modelIdx].score(wavFeatures)
                 startIdx += singleValLength
-            predictedSpeaker = np.argmax(speakerResult, axis=1)
-            nCorrectSpeaker = (predictedSpeaker == speakerIdx).sum()
-            nCorrect += nCorrectSpeaker
+            predictedcategory = np.argmax(categoryResult, axis=1)
+            nCorrectcategory = (predictedcategory == categoryIdx).sum()
+            nCorrect += nCorrectcategory
             nExamples += nValExamples
-            genderResults.append(speakerResult) # for future use
-            print('speakerClassificationTrain: hmmgmm: groupIdx: %d: %d correct out of %d <=> %02.0f%%' % (speakerIdx, nCorrectSpeaker, nValExamples, nCorrectSpeaker/nValExamples*100))
+            genderResults.append(categoryResult) # for future use
+            print('categoryClassificationTrain: hmmgmm: groupIdx: %d: %d correct out of %d <=> %02.0f%%' % (categoryIdx, nCorrectcategory, nValExamples, nCorrectcategory/nValExamples*100))
         if nCorrect > max_nCorrect:
             max_nCorrect = nCorrect
-            speakerModels2Save = speakerModels
-        print('speakerClassificationTrain: best performance on validation set: %d correct out of %d <=> %02.0f%%' % (nCorrect, nExamples, nCorrect / nExamples * 100))
+            categoryModels2Save = categoryModels
+        print('categoryClassificationTrain: best performance on validation set: %d correct out of %d <=> %02.0f%%' % (nCorrect, nExamples, nCorrect / nExamples * 100))
 
-    pickle.dump(speakerModels2Save, open(path2SpeakerModels, "wb"))
-    return speakerModels2Save
+    pickle.dump(categoryModels2Save, open(path2categoryModels, "wb"))
+    return categoryModels2Save
 
 def createSentencesMetadata(metadata, path2SentencesMetadata, nSentences = 500):
     # create sentence transitionMat:
@@ -863,9 +863,9 @@ def computeFilteringSmoothing(models, sentence, sentenceModel, trainOnLessFeatur
     mahalanobis = list()
     for wordIdx in range(nWords):
         wordFeatures = sentence[wordIdx + 1][1]
+        if trainOnLessFeatures:
+            wordFeatures = limitFeatures(wordFeatures)
         for modelIdx in range(nModels):
-            if trainOnLessFeatures:
-                wordFeatures = limitFeatures(wordFeatures)
             wordlogprob[wordIdx, modelIdx] = models[modelIdx].score(wordFeatures)
         if enableMahalanobisCala:
             nFrames, nFeatures, nMix = wordFeatures.shape[0], models[0].means_.shape[2], models[0].means_.shape[1]
@@ -1026,7 +1026,7 @@ def plotSentenceResults(sentencesEstimationResults, maleIdx, femaleIdx):
     plt.show()
 
 def limitFeatures(inputFeatures):
-    return inputFeatures[:, :13]
+    return inputFeatures[:, [1,3]]
 '''
 def fx(x, snr=5):
     sig_dbm = 10*np.log10(np.power(np.percentile(np.abs(x), 80), 2)) + 30
@@ -1034,3 +1034,19 @@ def fx(x, snr=5):
     noise_std = np.sqrt(np.power(10, (noise_dbm - 30)/10))
     return x + noise_std*np.random.randn(x.size)
 '''
+
+def wordFeatureHistograms(path2WordFeatures):
+    wordDatasetsFeatures = pickle.load(open(path2WordFeatures, "rb"))
+    featureEntryIdx = 0
+    nWords = len(wordDatasetsFeatures['train'][featureEntryIdx])
+    wordIdx = 0
+    nFeatures = np.min([wordDatasetsFeatures['train'][featureEntryIdx][0].shape[1], 13])
+    n_bins = 100
+    for featureIdx in range(nFeatures):
+        plt.figure()
+        for wordIdx in range(nWords):
+            specificWordFeature = wordDatasetsFeatures['train'][featureEntryIdx][wordIdx][:, featureIdx]
+            n, bins, patches = plt.hist(specificWordFeature, n_bins, density=True, histtype='step', cumulative=False, label='word %d' % wordIdx)
+        plt.legend()
+        plt.title('feature %d' % featureIdx)
+        plt.show()
