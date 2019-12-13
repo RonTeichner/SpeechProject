@@ -45,14 +45,14 @@ femaleIdx, maleIdx = np.arange(nGenders)
 
 enableGenderTrain = False
 enableSpeakerTrain = False
-enableWordDetection = True
+enableWordDetection = False
 enableSentenceDetection = True
 
 enablePureSentenceTest = True
 enablePureSentencePlots = True
 
-enableSentencePostEffectFeaturesCreation = True
-enableEffectSentencePlots = True
+enableSentencePostEffectFeaturesCreation = False
+enableEffectSentencePlots = False
 
 # create/load metadata:
 if os.path.isfile(path2metadata):

@@ -732,10 +732,10 @@ def createcategoryWavs_Features(metadata, fs, path2categoryAudio, path2categoryF
     return categoryDatasetsFeatures
 
 
-def categoryClassificationTrain(categoryDatasetsFeatures, path2categoryModels, type='speaker', trainOnLessFeatures=False):
+def categoryClassificationTrain(categoryDatasetsFeatures, path2categoryModels, type='speaker', trainOnLessFeatures=False, chosenFeatures=[]):
     ncategorys = len(categoryDatasetsFeatures['train'][0])
     covariance_type = 'diag'
-    nTrainIters = 2
+    nTrainIters = 1
     max_nCorrect = -np.inf
     for trainIter in range(nTrainIters):
         if type == 'speaker':
@@ -748,10 +748,11 @@ def categoryClassificationTrain(categoryDatasetsFeatures, path2categoryModels, t
             if nHmmStates == 1:
                 # empirically, train results are better with all the gender signals collapsed to a single signal
                 lengthsVec = np.expand_dims(lengthsVec.sum(), axis=0)
+                allFeaturesAllFrames = categoryDatasetsFeatures['train'][0][categoryIdx]
             if trainOnLessFeatures:
-                categoryModels[categoryIdx].fit(limitFeatures(categoryDatasetsFeatures['train'][0][categoryIdx]), lengths=lengthsVec)
+                categoryModels[categoryIdx].fit(limitFeatures(allFeaturesAllFrames, chosenFeatures), lengths=lengthsVec)
             else:
-                categoryModels[categoryIdx].fit(categoryDatasetsFeatures['train'][0][categoryIdx], lengths=lengthsVec)
+                categoryModels[categoryIdx].fit(allFeaturesAllFrames, lengths=lengthsVec)
 
         # validation:
         datasetKey = 'validate'
@@ -767,7 +768,7 @@ def categoryClassificationTrain(categoryDatasetsFeatures, path2categoryModels, t
                 stopIdx = startIdx + singleValLength
                 wavFeatures = categoryDatasetsFeatures[datasetKey][0][categoryIdx][startIdx:stopIdx]
                 if trainOnLessFeatures:
-                    wavFeatures = limitFeatures(wavFeatures)
+                    wavFeatures = limitFeatures(wavFeatures, chosenFeatures)
                 for modelIdx in range(ncategorys):
                     categoryResult[singleValIdx, modelIdx] = categoryModels[modelIdx].score(wavFeatures)
                 startIdx += singleValLength
@@ -857,14 +858,14 @@ def log2probs(logProbs):
     probs = np.exp(np.maximum(logProbs, -30)) # setting min value of -30 for log-values
     return probs / probs.sum()
 
-def computeFilteringSmoothing(models, sentence, sentenceModel, trainOnLessFeatures=False, enableMahalanobisCala=False):
+def computeFilteringSmoothing(models, sentence, sentenceModel, trainOnLessFeatures=False, enableMahalanobisCala=False, chosenFeatures=[]):
     nModels, nWords = len(models), len(sentence)-1
     wordlogprob = np.zeros([nWords, nModels])
     mahalanobis = list()
     for wordIdx in range(nWords):
         wordFeatures = sentence[wordIdx + 1][1]
         if trainOnLessFeatures:
-            wordFeatures = limitFeatures(wordFeatures)
+            wordFeatures = limitFeatures(wordFeatures, chosenFeatures)
         for modelIdx in range(nModels):
             wordlogprob[wordIdx, modelIdx] = models[modelIdx].score(wordFeatures)
         if enableMahalanobisCala:
@@ -920,7 +921,7 @@ def myForwardPass(framelogprob, transmat):
             myfwdlattice[latticeFrameIdx, nextState] = np.log(posteriorProbOfNextState)
     return  myfwdlattice
 
-def createSentencesEstimationResults(sentencesDatasetsFeatures, metadata, path2SentencesResults, path2WordModels, path2SpeakerModels, path2GenderModels, transitionMat, priorStates, trainOnLessFeatures=False, enableMahalanobisCala=False):
+def createSentencesEstimationResults(sentencesDatasetsFeatures, metadata, path2SentencesResults, path2WordModels, path2SpeakerModels, path2GenderModels, transitionMat, priorStates, trainOnLessFeatures=False, enableMahalanobisCala=False, chosenFeatures=[]):
     # load models:
     wordModels = pickle.load(open(path2WordModels, "rb"))
     speakerModels = pickle.load(open(path2SpeakerModels, "rb"))
@@ -959,10 +960,11 @@ def createSentencesEstimationResults(sentencesDatasetsFeatures, metadata, path2S
         sentenceDict['results']['speaker']['filtering'], sentenceDict['results']['speaker']['smoothing'], sentenceDict['results']['speaker']['mahalanobis'] = computeFilteringSmoothing(speakerModels, sentence, speakerSentenceModel, trainOnLessFeatures=False, enableMahalanobisCala=False)
 
         sentenceDict['results']['word'] = dict()
-        sentenceDict['results']['word']['filtering'], sentenceDict['results']['word']['smoothing'], sentenceDict['results']['word']['mahalanobis'] = computeFilteringSmoothing(wordModels, sentence, wordSentenceModel, trainOnLessFeatures, enableMahalanobisCala)
+        sentenceDict['results']['word']['filtering'], sentenceDict['results']['word']['smoothing'], sentenceDict['results']['word']['mahalanobis'] = computeFilteringSmoothing(wordModels, sentence, wordSentenceModel, trainOnLessFeatures, enableMahalanobisCala, chosenFeatures)
 
         sentencesEstimationResults.append(sentenceDict)
     pickle.dump(sentencesEstimationResults, open(path2SentencesResults, "wb"))
+    return sentencesEstimationResults
 
 def plotSentenceResults(sentencesEstimationResults, maleIdx, femaleIdx):
     # convert model first-word estimations to np-arrays:
@@ -1025,8 +1027,12 @@ def plotSentenceResults(sentencesEstimationResults, maleIdx, femaleIdx):
         plt.xlabel('likelihood')
     plt.show()
 
-def limitFeatures(inputFeatures):
-    return inputFeatures[:, [1,3]]
+def limitFeatures(inputFeatures, chosenFeatures=[]):
+    if chosenFeatures == []:
+        y = inputFeatures[:, :13]
+    else:
+        y = inputFeatures[:, chosenFeatures]
+    return y
 '''
 def fx(x, snr=5):
     sig_dbm = 10*np.log10(np.power(np.percentile(np.abs(x), 80), 2)) + 30
@@ -1050,3 +1056,35 @@ def wordFeatureHistograms(path2WordFeatures):
         plt.legend()
         plt.title('feature %d' % featureIdx)
         plt.show()
+
+def meanFilteringSmoothingCalc(sentencesEstimationResults, maleIdx, femaleIdx):
+    # convert model first-word estimations to np-arrays:
+    nSentences = len(sentencesEstimationResults)
+    classCategories = ['word']#, 'gender', 'speaker']
+    collectedFirstWordSentenceResults = dict()
+    for estimationClass in classCategories:
+        collectedFirstWordSentenceResults[estimationClass] = dict()
+        firstDigit_filtering, firstDigit_smoothing, firstDigit_raw = np.zeros(nSentences), np.zeros(nSentences), np.zeros(nSentences)
+        for sentenceIdx in range(nSentences):
+            sentenceResult = sentencesEstimationResults[sentenceIdx]
+            if estimationClass == 'word':
+                trueFirstDigit = sentenceResult['groundTruth']['Digits'][0]
+                firstDigit_filtering[sentenceIdx] = sentenceResult['results'][estimationClass]['filtering'][0][trueFirstDigit]
+                firstDigit_smoothing[sentenceIdx] = sentenceResult['results'][estimationClass]['smoothing'][0][trueFirstDigit]
+            elif estimationClass == 'gender':
+                trueGender = sentenceResult['groundTruth']['SpeakerGender']
+                if trueGender == 'male':
+                    trueGenderIdx = maleIdx
+                else:
+                    trueGenderIdx = femaleIdx
+                firstDigit_filtering[sentenceIdx] = sentenceResult['results'][estimationClass]['filtering'][0][trueGenderIdx]
+                firstDigit_smoothing[sentenceIdx] = sentenceResult['results'][estimationClass]['smoothing'][0][trueGenderIdx]
+            elif estimationClass == 'speaker':
+                trueSpeakerNo = int(sentenceResult['groundTruth']['SpeakerNo']) - 1
+                firstDigit_filtering[sentenceIdx] = sentenceResult['results'][estimationClass]['filtering'][0][trueSpeakerNo]
+                firstDigit_smoothing[sentenceIdx] = sentenceResult['results'][estimationClass]['smoothing'][0][trueSpeakerNo]
+        collectedFirstWordSentenceResults[estimationClass]['filtering'] = firstDigit_filtering
+        collectedFirstWordSentenceResults[estimationClass]['smoothing'] = firstDigit_smoothing
+    meanFiltering = collectedFirstWordSentenceResults[estimationClass]['filtering'].mean()
+    meanSmoothing = collectedFirstWordSentenceResults[estimationClass]['smoothing'].mean()
+    return meanFiltering, meanSmoothing
