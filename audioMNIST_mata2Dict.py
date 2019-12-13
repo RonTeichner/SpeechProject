@@ -989,7 +989,7 @@ def plotSentenceResults(sentencesEstimationResults, maleIdx, femaleIdx):
             elif estimationClass == 'speaker':
                 trueSpeakerNo = int(sentenceResult['groundTruth']['SpeakerNo']) - 1
                 firstDigit_filtering[sentenceIdx] = sentenceResult['results'][estimationClass]['filtering'][0][trueSpeakerNo]
-                firstDigit_smoothing[sentenceIdx] = sentenceResult['results'][estimationClass]['smoothing'][0][trueSpeakerNo]                        
+                firstDigit_smoothing[sentenceIdx] = sentenceResult['results'][estimationClass]['smoothing'][0][trueSpeakerNo]
         collectedFirstWordSentenceResults[estimationClass]['filtering'] = firstDigit_filtering
         collectedFirstWordSentenceResults[estimationClass]['smoothing'] = firstDigit_smoothing
 
@@ -1027,3 +1027,10 @@ def plotSentenceResults(sentencesEstimationResults, maleIdx, femaleIdx):
 
 def limitFeatures(inputFeatures):
     return inputFeatures[:, :13]
+'''
+def fx(x, snr=5):
+    sig_dbm = 10*np.log10(np.power(np.percentile(np.abs(x), 80), 2)) + 30
+    noise_dbm = sig_dbm - snr
+    noise_std = np.sqrt(np.power(10, (noise_dbm - 30)/10))
+    return x + noise_std*np.random.randn(x.size)
+'''
