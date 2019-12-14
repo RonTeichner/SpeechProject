@@ -52,9 +52,9 @@ while True:
     np.random.shuffle(nFeatures2Choose)
     nFeatures2Choose = nFeatures2Choose[0]
 
-    chosenFeatures = np.arange(39)
+    chosenFeatures = np.arange(start=2, stop=39)
     np.random.shuffle(chosenFeatures)
-    chosenFeatures = chosenFeatures[:nFeatures2Choose]
+    chosenFeatures = np.concatenate([chosenFeatures[:nFeatures2Choose], [1]])
 
     wordModels = categoryClassificationTrain(wordDatasetsFeatures, path2WordModels, 'words', True, chosenFeatures)
     sentencesEstimationResults = createSentencesEstimationResults(sentencesDatasetsFeatures[:100], metadata, path2SentencesResults, path2WordModels, path2SpeakerModels, path2GenderModels, transitionMat, priorStates, trainOnLessFeatures=True, enableMahalanobisCala=True, chosenFeatures=chosenFeatures)
