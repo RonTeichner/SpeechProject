@@ -927,7 +927,7 @@ def myForwardPass(framelogprob, transmat):
             myfwdlattice[latticeFrameIdx, nextState] = np.log(posteriorProbOfNextState)
     return  myfwdlattice
 
-def createSentencesEstimationResults(sentencesDatasetsFeatures, metadata, path2SentencesResults, path2WordModels, path2SpeakerModels, path2GenderModels, transitionMat, priorStates, trainOnLessFeatures=False, enableMahalanobisCala=False, chosenFeatures=[]):
+def createSentencesEstimationResults(sentencesDatasetsFeatures, sentencesDatasetsPitch, metadata, path2SentencesResults, path2WordModels, path2SpeakerModels, path2GenderModels, transitionMat, priorStates, trainOnLessFeatures=False, enableMahalanobisCala=False, chosenFeatures=[]):
     # load models:
     wordModels = pickle.load(open(path2WordModels, "rb"))
     speakerModels = pickle.load(open(path2SpeakerModels, "rb"))
@@ -968,9 +968,37 @@ def createSentencesEstimationResults(sentencesDatasetsFeatures, metadata, path2S
         sentenceDict['results']['word'] = dict()
         sentenceDict['results']['word']['filtering'], sentenceDict['results']['word']['smoothing'], sentenceDict['results']['word']['mahalanobis'] = computeFilteringSmoothing(wordModels, sentence, wordSentenceModel, trainOnLessFeatures, enableMahalanobisCala, chosenFeatures)
 
+        sentenceDict['results']['pitch'] = dict()
+        sentenceDict['results']['pitch']['filtering'], sentenceDict['results']['pitch']['smoothing'] = computePitchDistribution(sentencesDatasetsPitch[sentenceIdx])
+
         sentencesEstimationResults.append(sentenceDict)
     pickle.dump(sentencesEstimationResults, open(path2SentencesResults, "wb"))
     return sentencesEstimationResults
+
+def computePitchDistribution(sentence):
+    n_components = 2
+    filteringMeans = np.zeros((n_components, len(sentence)-1))
+    filteringCovs = np.zeros((n_components, len(sentence) - 1))
+    for wordIdx, word in enumerate(sentence):
+        if wordIdx == 0:
+            speakerNo = int(word)
+            continue
+        pitchIndexes = word[1].nonzero()
+        pitchValues = word[1][pitchIndexes]
+        if wordIdx == 1:
+            allPitchValues = pitchValues
+        else:
+            allPitchValues = np.hstack((allPitchValues, pitchValues))
+        GaussianMixModel = GaussianMixture(n_components=n_components, covariance_type='diag', reg_covar=1).fit(np.expand_dims(allPitchValues, axis=1))
+        filteringMeans[:, wordIdx-1:wordIdx] = GaussianMixModel.means_
+        filteringCovs[:, wordIdx-1:wordIdx] = GaussianMixModel.covariances_
+    smoothingMeans = filteringMeans[:, -1]
+    smoothingCovs = filteringCovs[:, -1]
+    filteringDict = dict()
+    filteringDict['means'], filteringDict['covs'] = filteringMeans, filteringCovs
+    smoothingDict = dict()
+    smoothingDict['means'], smoothingDict['covs'] = smoothingMeans, smoothingCovs
+    return filteringDict, smoothingDict
 
 def plotSentenceResults(sentencesEstimationResults, maleIdx, femaleIdx):
     # convert model first-word estimations to np-arrays:
@@ -1094,3 +1122,23 @@ def meanFilteringSmoothingCalc(sentencesEstimationResults, maleIdx, femaleIdx):
     meanFiltering = collectedFirstWordSentenceResults[estimationClass]['filtering'].mean()
     meanSmoothing = collectedFirstWordSentenceResults[estimationClass]['smoothing'].mean()
     return meanFiltering, meanSmoothing
+
+def plotPitchHistogramPerSentence(sentencesDatasetsPitch):
+    n_bins = 20
+    for sentenceIdx, sentence in enumerate(sentencesDatasetsPitch):
+        plt.figure()
+        for wordIdx, word in enumerate(sentence):
+            if wordIdx == 0:
+                speakerNo = int(word)
+                continue
+            pitchIndexes = word[1].nonzero()
+            pitchValues = word[1][pitchIndexes]
+            if wordIdx == 1:
+                allPitchValues = pitchValues
+            else:
+                allPitchValues = np.hstack((allPitchValues, pitchValues))
+        n, bins, patches = plt.hist(allPitchValues, n_bins, density=True, histtype='step', cumulative=False, label='sentence %d; speaker %d:' % (sentenceIdx, speakerNo))
+        plt.xlabel('Pitch [Hz]')
+        plt.legend()
+        plt.xlim(50, 400)
+        plt.show()

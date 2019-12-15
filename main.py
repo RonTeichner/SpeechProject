@@ -46,16 +46,14 @@ femaleIdx, maleIdx = np.arange(nGenders)
 
 enableGenderTrain = False
 enableSpeakerTrain = False
-enableWordDetection = False
-enableSentenceDetection = False
+enableWordDetection = True
+enableSentenceDetection = True
 
 enablePureSentenceTest = False
 enablePureSentencePlots = False
 
-enableSentencePostEffectFeaturesCreation = False
-enableEffectSentencePlots = False
-
-enableCreateSentencesPitchDataset = True
+#enableSentencePostEffectFeaturesCreation = False
+#enableEffectSentencePlots = False
 
 # create/load metadata:
 if os.path.isfile(path2metadata):
@@ -111,7 +109,7 @@ if enableWordDetection:
     if os.path.isfile(path2WordModels):
         wordModels = pickle.load(open(path2WordModels, "rb"))
     else:
-        wordModels = categoryClassificationTrain(wordDatasetsFeatures, path2WordModels, 'words', trainOnLessFeatures=True)
+        wordModels = categoryClassificationTrain(wordDatasetsFeatures, path2WordModels, 'words', trainOnLessFeatures=False)
 
 if enableSentenceDetection:
     if os.path.isfile(path2SentencesResults):
@@ -133,16 +131,26 @@ if enableSentenceDetection:
         else:
             sentencesDatasetsFeatures = createSentenceWavs_Features(sentencesMetadata, path2SentencesAudio, path2SentencesFeatures)
 
+        # create\load sentences pitch:
+        if os.path.isfile(path2SentencesPitch):
+            sentencesDatasetsPitch = pickle.load(open(path2SentencesPitch, "rb"))
+            # plotPitchHistogramPerSentence(sentencesDatasetsPitch)
+        else:
+            sentencesMetadata, priorStates, transitionMat = pickle.load(open(path2SentencesMetadata, "rb"))
+            sentencesDatasetsPitch = createSentenceWavs_Features(sentencesMetadata, None, path2SentencesPitch, includeEffects=False, createPitch=True)
+            # plotPitchHistogramPerSentence(sentencesDatasetsPitch)
+            # The conclusion from plotting the pitch histograms per sentence is to model the sentence speach by a mixture of two Gaussians
+
         # create\load sentences estimation results:
         if os.path.isfile(path2SentencesResults):
             sentencesEstimationResults = pickle.load(open(path2SentencesResults, "rb"))
         else:
-            sentencesEstimationResults = createSentencesEstimationResults(sentencesDatasetsFeatures, metadata, path2SentencesResults, path2WordModels, path2SpeakerModels, path2GenderModels, transitionMat, priorStates, trainOnLessFeatures=True, enableMahalanobisCala=True)
+            sentencesEstimationResults = createSentencesEstimationResults(sentencesDatasetsFeatures, sentencesDatasetsPitch, metadata, path2SentencesResults, path2WordModels, path2SpeakerModels, path2GenderModels, transitionMat, priorStates, trainOnLessFeatures=False, enableMahalanobisCala=False)
 
 if enablePureSentencePlots:
     sentencesEstimationResults = pickle.load(open(path2SentencesResults, "rb"))
     plotSentenceResults(sentencesEstimationResults, maleIdx, femaleIdx)
-
+'''
 if enableSentencePostEffectFeaturesCreation:
 
     # create\load sentences features:
@@ -163,8 +171,5 @@ if enableSentencePostEffectFeaturesCreation:
 if enableEffectSentencePlots:
     sentencesPostEffectsEstimationResults = pickle.load(open(path2SentencesPostEffectsResults, "rb"))
     plotSentenceResults(sentencesPostEffectsEstimationResults, maleIdx, femaleIdx)
-
+'''
 # wordFeatureHistograms(path2WordFeatures)
-if enableCreateSentencesPitchDataset:
-    sentencesMetadata, priorStates, transitionMat = pickle.load(open(path2SentencesMetadata, "rb"))
-    createSentenceWavs_Features(sentencesMetadata, None, path2SentencesPitch, includeEffects=False, createPitch=True)
