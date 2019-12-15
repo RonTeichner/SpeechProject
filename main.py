@@ -33,6 +33,7 @@ path2WordModels = './WordModels.pt'
 path2SentencesMetadata = './SentencesMetadata.pt'
 path2SentencesAudio = './SentencesAudio.pt'
 path2SentencesFeatures = './SentencesFeatures.pt'
+path2SentencesPitch = './SentencesPitch.pt'
 
 path2SentencesPostEffectsFeatures = './SentencesPostEffectsFeatures.pt'
 path2SentencesPostEffectsAudio = './SentencesPostEffectsAudio.pt'
@@ -46,13 +47,15 @@ femaleIdx, maleIdx = np.arange(nGenders)
 enableGenderTrain = False
 enableSpeakerTrain = False
 enableWordDetection = False
-enableSentenceDetection = True
+enableSentenceDetection = False
 
-enablePureSentenceTest = True
-enablePureSentencePlots = True
+enablePureSentenceTest = False
+enablePureSentencePlots = False
 
 enableSentencePostEffectFeaturesCreation = False
 enableEffectSentencePlots = False
+
+enableCreateSentencesPitchDataset = True
 
 # create/load metadata:
 if os.path.isfile(path2metadata):
@@ -161,4 +164,7 @@ if enableEffectSentencePlots:
     sentencesPostEffectsEstimationResults = pickle.load(open(path2SentencesPostEffectsResults, "rb"))
     plotSentenceResults(sentencesPostEffectsEstimationResults, maleIdx, femaleIdx)
 
-wordFeatureHistograms(path2WordFeatures)
+# wordFeatureHistograms(path2WordFeatures)
+if enableCreateSentencesPitchDataset:
+    sentencesMetadata, priorStates, transitionMat = pickle.load(open(path2SentencesMetadata, "rb"))
+    createSentenceWavs_Features(sentencesMetadata, None, path2SentencesPitch, includeEffects=False, createPitch=True)

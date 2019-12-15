@@ -11,6 +11,8 @@ from hmmlearn.utils import log_normalize
 from sklearn.mixture import GaussianMixture
 from pysndfx import AudioEffectsChain
 from copy import deepcopy
+import amfm_decompy.pYAAPT as pYAAPT
+import amfm_decompy.basic_tools as basic
 
 
 def createAudioMNIST_metadataDict():
@@ -830,7 +832,7 @@ def createSentencesMetadata(metadata, path2SentencesMetadata, nSentences = 500):
     pickle.dump([sentencesMetadata, priorStates, transitionMat], open(path2SentencesMetadata, "wb"))
     return sentencesMetadata, priorStates, transitionMat
 
-def createSentenceWavs_Features(sentencesMetadata, path2SentencesAudio, path2SentencesFeatures, includeEffects=False):
+def createSentenceWavs_Features(sentencesMetadata, path2SentencesAudio, path2SentencesFeatures, includeEffects=False, createPitch=False):
     if includeEffects:
         fx = (AudioEffectsChain().reverb(room_scale=100, wet_gain=10, hf_damping=100, reverberance=100))
 
@@ -840,16 +842,20 @@ def createSentenceWavs_Features(sentencesMetadata, path2SentencesAudio, path2Sen
         if sentenceIdx % 100 == 0:
             print('createSentenceWavs_Features: starting sentence %d out of %d' % (sentenceIdx, len(sentencesMetadata)))
         for wordIdx, wordPath in enumerate(sentenceMetadata):
-            if wordIdx == 0:
-                continue
-            fs, wav = wavfile.read(list(wordPath)[1])
-            if includeEffects:
-                wav = fx(wav)
+            if wordIdx == 0: continue
+            digit, filename = wordPath[0], list(wordPath)[1]
+            if not(createPitch):
+                fs, wav = wavfile.read(filename)
+                if includeEffects:
+                    wav = fx(wav)
 
-            digit = wordPath[0]
-            sentencesAudio[sentenceIdx][wordIdx] = (digit, wav)
-            sentencesFeatures[sentenceIdx][wordIdx] = (digit, np.float32(extract_features(wav, fs)))
-    pickle.dump(sentencesAudio, open(path2SentencesAudio, "wb"))
+                sentencesAudio[sentenceIdx][wordIdx] = (digit, wav)
+                sentencesFeatures[sentenceIdx][wordIdx] = (digit, np.float32(extract_features(wav, fs)))
+            else:
+                signal = basic.SignalObj(filename)
+                pitch = pYAAPT.yaapt(signal)
+                sentencesFeatures[sentenceIdx][wordIdx] = (digit, np.float32(pitch.samp_values))
+    if path2SentencesAudio is not None: pickle.dump(sentencesAudio, open(path2SentencesAudio, "wb"))
     pickle.dump(sentencesFeatures, open(path2SentencesFeatures, "wb"))
     return sentencesFeatures
 
