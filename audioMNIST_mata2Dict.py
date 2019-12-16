@@ -13,7 +13,7 @@ from pysndfx import AudioEffectsChain
 from copy import deepcopy
 import amfm_decompy.pYAAPT as pYAAPT
 import amfm_decompy.basic_tools as basic
-
+import scipy.stats as stats
 
 def createAudioMNIST_metadataDict():
     path2AudioMNIST = '../AudioMNIST/data/'
@@ -752,9 +752,8 @@ def categoryClassificationTrain(categoryDatasetsFeatures, path2categoryModels, t
                 lengthsVec = np.expand_dims(lengthsVec.sum(), axis=0)
                 allFeaturesAllFrames = categoryDatasetsFeatures['train'][0][categoryIdx]
             if trainOnLessFeatures:
-                categoryModels[categoryIdx].fit(limitFeatures(allFeaturesAllFrames, chosenFeatures), lengths=lengthsVec)
-            else:
-                categoryModels[categoryIdx].fit(allFeaturesAllFrames, lengths=lengthsVec)
+                allFeaturesAllFrames = limitFeatures(allFeaturesAllFrames, chosenFeatures)
+            categoryModels[categoryIdx].fit(allFeaturesAllFrames, lengths=lengthsVec)
 
         # validation:
         datasetKey = 'validate'
@@ -960,13 +959,13 @@ def createSentencesEstimationResults(sentencesDatasetsFeatures, sentencesDataset
         sentenceDict['results'] = dict()
 
         sentenceDict['results']['gender'] = dict()
-        sentenceDict['results']['gender']['filtering'], sentenceDict['results']['gender']['smoothing'], sentenceDict['results']['gender']['mahalanobis'] = computeFilteringSmoothing(genderModels, sentence, genderSentenceModel, trainOnLessFeatures=False, enableMahalanobisCala=False)
+        sentenceDict['results']['gender']['filtering'], sentenceDict['results']['gender']['smoothing'], sentenceDict['results']['gender']['mahalanobis'] = computeFilteringSmoothing(genderModels, sentence, genderSentenceModel, trainOnLessFeatures=trainOnLessFeatures, enableMahalanobisCala=False, chosenFeatures=chosenFeatures)
 
         sentenceDict['results']['speaker'] = dict()
-        sentenceDict['results']['speaker']['filtering'], sentenceDict['results']['speaker']['smoothing'], sentenceDict['results']['speaker']['mahalanobis'] = computeFilteringSmoothing(speakerModels, sentence, speakerSentenceModel, trainOnLessFeatures=False, enableMahalanobisCala=False)
+        sentenceDict['results']['speaker']['filtering'], sentenceDict['results']['speaker']['smoothing'], sentenceDict['results']['speaker']['mahalanobis'] = computeFilteringSmoothing(speakerModels, sentence, speakerSentenceModel, trainOnLessFeatures=trainOnLessFeatures, enableMahalanobisCala=False, chosenFeatures=chosenFeatures)
 
         sentenceDict['results']['word'] = dict()
-        sentenceDict['results']['word']['filtering'], sentenceDict['results']['word']['smoothing'], sentenceDict['results']['word']['mahalanobis'] = computeFilteringSmoothing(wordModels, sentence, wordSentenceModel, trainOnLessFeatures, enableMahalanobisCala, chosenFeatures)
+        sentenceDict['results']['word']['filtering'], sentenceDict['results']['word']['smoothing'], sentenceDict['results']['word']['mahalanobis'] = computeFilteringSmoothing(wordModels, sentence, wordSentenceModel, trainOnLessFeatures=trainOnLessFeatures, enableMahalanobisCala=False, chosenFeatures=chosenFeatures)
 
         sentenceDict['results']['pitch'] = dict()
         sentenceDict['results']['pitch']['filtering'], sentenceDict['results']['pitch']['smoothing'] = computePitchDistribution(sentencesDatasetsPitch[sentenceIdx])
@@ -976,9 +975,10 @@ def createSentencesEstimationResults(sentencesDatasetsFeatures, sentencesDataset
     return sentencesEstimationResults
 
 def computePitchDistribution(sentence):
-    n_components = 2
+    n_components = 2 # from impression, 2 is the correct no.
     filteringMeans = np.zeros((n_components, len(sentence)-1))
     filteringCovs = np.zeros((n_components, len(sentence) - 1))
+    filteringWeights = np.zeros((n_components, len(sentence)-1))
     for wordIdx, word in enumerate(sentence):
         if wordIdx == 0:
             speakerNo = int(word)
@@ -989,15 +989,23 @@ def computePitchDistribution(sentence):
             allPitchValues = pitchValues
         else:
             allPitchValues = np.hstack((allPitchValues, pitchValues))
-        GaussianMixModel = GaussianMixture(n_components=n_components, covariance_type='diag', reg_covar=1).fit(np.expand_dims(allPitchValues, axis=1))
-        filteringMeans[:, wordIdx-1:wordIdx] = GaussianMixModel.means_
-        filteringCovs[:, wordIdx-1:wordIdx] = GaussianMixModel.covariances_
-    smoothingMeans = filteringMeans[:, -1]
-    smoothingCovs = filteringCovs[:, -1]
+        GaussianMixModel = GaussianMixture(n_components=n_components, covariance_type='diag', reg_covar=1e-1).fit(np.expand_dims(allPitchValues, axis=1))
+        filteringMeans[:, wordIdx-1:wordIdx], filteringCovs[:, wordIdx-1:wordIdx], filteringWeights[:, wordIdx-1:wordIdx] = GaussianMixModel.means_, GaussianMixModel.covariances_, np.expand_dims(GaussianMixModel.weights_, axis=1)
     filteringDict = dict()
-    filteringDict['means'], filteringDict['covs'] = filteringMeans, filteringCovs
+    filteringDict['means'], filteringDict['covs'], filteringDict['weights'] = filteringMeans, filteringCovs, filteringWeights
     smoothingDict = dict()
-    smoothingDict['means'], smoothingDict['covs'] = smoothingMeans, smoothingCovs
+    smoothingDict['means'], smoothingDict['covs'], smoothingDict['weights'] = filteringMeans[:, -1], filteringCovs[:, -1], filteringWeights[:, -1]
+    if False:
+        n_bins = 20
+        n, bins, patches = plt.hist(allPitchValues, n_bins, density=True, histtype='step', cumulative=False, label='hist')
+        for componentIdx in range(n_components):
+            mu, sigma, weight = smoothingDict['means'][componentIdx], np.sqrt(smoothingDict['covs'][componentIdx]), smoothingDict['weights'][componentIdx]
+            x = np.linspace(mu - 3 * sigma, mu + 3 * sigma, 100)
+            plt.plot(x, weight * stats.norm.pdf(x, mu, sigma), label='component %d' % componentIdx)
+        plt.xlabel('Pitch [Hz]')
+        plt.legend()
+        # plt.xlim(50, 400)
+        plt.show()
     return filteringDict, smoothingDict
 
 def plotSentenceResults(sentencesEstimationResults, maleIdx, femaleIdx):
@@ -1063,7 +1071,8 @@ def plotSentenceResults(sentencesEstimationResults, maleIdx, femaleIdx):
 
 def limitFeatures(inputFeatures, chosenFeatures=[]):
     if chosenFeatures == []:
-        y = inputFeatures[:, :13]
+        y = inputFeatures
+        raise Exception('I did not want to end up here')
     else:
         y = inputFeatures[:, chosenFeatures]
     return y
@@ -1091,10 +1100,10 @@ def wordFeatureHistograms(path2WordFeatures):
         plt.title('feature %d' % featureIdx)
         plt.show()
 
-def meanFilteringSmoothingCalc(sentencesEstimationResults, maleIdx, femaleIdx):
+def meanFilteringSmoothingCalc(sentencesEstimationResults, maleIdx, femaleIdx, classCategories):
     # convert model first-word estimations to np-arrays:
     nSentences = len(sentencesEstimationResults)
-    classCategories = ['word']#, 'gender', 'speaker']
+    #classCategories = ['word']#, 'gender', 'speaker']
     collectedFirstWordSentenceResults = dict()
     for estimationClass in classCategories:
         collectedFirstWordSentenceResults[estimationClass] = dict()
@@ -1123,8 +1132,9 @@ def meanFilteringSmoothingCalc(sentencesEstimationResults, maleIdx, femaleIdx):
     meanSmoothing = collectedFirstWordSentenceResults[estimationClass]['smoothing'].mean()
     return meanFiltering, meanSmoothing
 
-def plotPitchHistogramPerSentence(sentencesDatasetsPitch):
+def plotPitchHistogramPerSentence(sentencesDatasetsPitch, sentencesEstimationResults):
     n_bins = 20
+    nGaussianComponents = sentencesEstimationResults[0]['results']['pitch']['smoothing']['weights'].size
     for sentenceIdx, sentence in enumerate(sentencesDatasetsPitch):
         plt.figure()
         for wordIdx, word in enumerate(sentence):
@@ -1137,8 +1147,19 @@ def plotPitchHistogramPerSentence(sentencesDatasetsPitch):
                 allPitchValues = pitchValues
             else:
                 allPitchValues = np.hstack((allPitchValues, pitchValues))
+        pitchMeans, pitchVars, pitchWeights = sentencesEstimationResults[sentenceIdx]['results']['pitch']['smoothing']['means'], sentencesEstimationResults[sentenceIdx]['results']['pitch']['smoothing']['covs'], sentencesEstimationResults[sentenceIdx]['results']['pitch']['smoothing']['weights']
         n, bins, patches = plt.hist(allPitchValues, n_bins, density=True, histtype='step', cumulative=False, label='sentence %d; speaker %d:' % (sentenceIdx, speakerNo))
+        x = np.linspace(allPitchValues.min(), allPitchValues.max(), 200)
+        allComponents = np.zeros(x.shape)
+        for componentIdx in range(nGaussianComponents):
+            mu, sigma, weight = pitchMeans[componentIdx], np.sqrt(pitchVars[componentIdx]), pitchWeights[componentIdx]
+            singleComponent = weight * stats.norm.pdf(x, mu, sigma)
+            plt.plot(x, singleComponent, label='component %d' % componentIdx)
+            allComponents += singleComponent
+        plt.plot(x, allComponents, label='mixture')
+
+
         plt.xlabel('Pitch [Hz]')
         plt.legend()
-        plt.xlim(50, 400)
+        #plt.xlim(50, 400)
         plt.show()

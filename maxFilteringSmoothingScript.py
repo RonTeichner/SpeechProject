@@ -21,12 +21,12 @@ path2GenderModels = './GenderModels.pt'
 path2metadataSpeakerDict = './AudioMNISTMetadataSpeaker.pt'
 path2SpeakerFeatures = './SpeakerFeatures.pt'
 path2SpeakerAudio = './SpeakerAudio.pt'
-path2SpeakerModels = './SpeakerModels.pt'
+path2SpeakerModels = './SpeakerModelsTmp.pt'
 
 path2metadataWordDict = './AudioMNISTMetadataWord.pt'
 path2WordFeatures = './WordFeatures.pt'
 path2WordAudio = './WordAudio.pt'
-path2WordModels = './WordModelsTmp.pt'
+path2WordModels = './WordModels.pt'
 
 path2SentencesMetadata = './SentencesMetadata.pt'
 path2SentencesAudio = './SentencesAudio.pt'
@@ -42,9 +42,15 @@ nGenders = 2
 femaleIdx, maleIdx = np.arange(nGenders)
 
 metadata = pickle.load(open(path2metadata, "rb"))
+
 wordDatasetsFeatures = pickle.load(open(path2WordFeatures, "rb"))
+genderDatasetsFeatures = pickle.load(open(path2GenderFeatures, "rb"))
+speakerDatasetsFeatures = pickle.load(open(path2SpeakerFeatures, "rb"))
+
 sentencesMetadata, priorStates, transitionMat = pickle.load(open(path2SentencesMetadata, "rb"))
 sentencesDatasetsFeatures = pickle.load(open(path2SentencesFeatures, "rb"))
+
+caseStudy = 'speaker' #'gender'# 'speaker' 'word'
 
 maxDiff = -np.inf
 while True:
@@ -52,13 +58,22 @@ while True:
     np.random.shuffle(nFeatures2Choose)
     nFeatures2Choose = nFeatures2Choose[0]
 
-    chosenFeatures = np.arange(start=2, stop=39)
+    #chosenFeatures = np.arange(start=2, stop=39)
+    chosenFeatures = np.arange(start=1, stop=39)
     np.random.shuffle(chosenFeatures)
-    chosenFeatures = np.concatenate([chosenFeatures[:nFeatures2Choose], [1]])
+    #chosenFeatures = np.concatenate([chosenFeatures[:nFeatures2Choose], [1]])
+    chosenFeatures = chosenFeatures[:nFeatures2Choose]
 
-    wordModels = categoryClassificationTrain(wordDatasetsFeatures, path2WordModels, 'words', True, chosenFeatures)
-    sentencesEstimationResults = createSentencesEstimationResults(sentencesDatasetsFeatures[:100], metadata, path2SentencesResults, path2WordModels, path2SpeakerModels, path2GenderModels, transitionMat, priorStates, trainOnLessFeatures=True, enableMahalanobisCala=True, chosenFeatures=chosenFeatures)
-    meanFiltering, meanSmoothing = meanFilteringSmoothingCalc(sentencesEstimationResults, maleIdx, femaleIdx)
+    if caseStudy == 'word':
+        categoryClassificationTrain(wordDatasetsFeatures, path2WordModels, 'words', True, chosenFeatures)
+    elif caseStudy == 'gender':
+        categoryClassificationTrain(genderDatasetsFeatures, path2GenderModels, 'speaker', True, chosenFeatures)
+    elif caseStudy == 'speaker':
+        categoryClassificationTrain(speakerDatasetsFeatures, path2SpeakerModels, 'speaker', True, chosenFeatures)
+
+    sentencesEstimationResults = createSentencesEstimationResults(sentencesDatasetsFeatures[:100], None, metadata, path2SentencesResults, path2WordModels, path2SpeakerModels, path2GenderModels, transitionMat, priorStates, trainOnLessFeatures=True, enableMahalanobisCala=True, chosenFeatures=chosenFeatures)
+
+    meanFiltering, meanSmoothing = meanFilteringSmoothingCalc(sentencesEstimationResults, maleIdx, femaleIdx, classCategories=caseStudy)
 
     currentDiff = 100*(meanSmoothing-meanFiltering)
     if currentDiff > maxDiff:

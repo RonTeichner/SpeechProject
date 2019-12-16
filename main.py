@@ -44,16 +44,18 @@ path2SentencesPostEffectsResults = './SentencesPostEffectsResults.pt'
 nGenders = 2
 femaleIdx, maleIdx = np.arange(nGenders)
 
-enableGenderTrain = False
-enableSpeakerTrain = False
+enableGenderTrain = True
+enableSpeakerTrain = True
 enableWordDetection = True
 enableSentenceDetection = True
 
-enablePureSentenceTest = False
-enablePureSentencePlots = False
+enablePureSentenceTest = True
+enablePureSentencePlots = True
 
 #enableSentencePostEffectFeaturesCreation = False
 #enableEffectSentencePlots = False
+
+chosenFeatures = [1, 13, 21] # best word features
 
 # create/load metadata:
 if os.path.isfile(path2metadata):
@@ -79,7 +81,7 @@ if enableGenderTrain:
     if os.path.isfile(path2GenderModels):
         genderModels = pickle.load(open(path2GenderModels, "rb"))
     else:
-        categoryClassificationTrain(genderDatasetsFeatures, path2GenderModels)
+        genderModels = categoryClassificationTrain(genderDatasetsFeatures, path2GenderModels, type='speaker', trainOnLessFeatures=True, chosenFeatures=chosenFeatures)
 
 if enableSpeakerTrain:
     # create\load speakers features:
@@ -93,7 +95,7 @@ if enableSpeakerTrain:
     if os.path.isfile(path2SpeakerModels):
         speakerModels = pickle.load(open(path2SpeakerModels, "rb"))
     else:
-        categoryClassificationTrain(speakerDatasetsFeatures, path2SpeakerModels)
+        speakerModels = categoryClassificationTrain(speakerDatasetsFeatures, path2SpeakerModels, type='speaker', trainOnLessFeatures=True, chosenFeatures=chosenFeatures)
 
 if enableWordDetection:
     # create\load speakers features:
@@ -109,7 +111,7 @@ if enableWordDetection:
     if os.path.isfile(path2WordModels):
         wordModels = pickle.load(open(path2WordModels, "rb"))
     else:
-        wordModels = categoryClassificationTrain(wordDatasetsFeatures, path2WordModels, 'words', trainOnLessFeatures=False)
+        wordModels = categoryClassificationTrain(wordDatasetsFeatures, path2WordModels, type='words', trainOnLessFeatures=True, chosenFeatures=chosenFeatures)
 
 if enableSentenceDetection:
     if os.path.isfile(path2SentencesResults):
@@ -145,7 +147,7 @@ if enableSentenceDetection:
         if os.path.isfile(path2SentencesResults):
             sentencesEstimationResults = pickle.load(open(path2SentencesResults, "rb"))
         else:
-            sentencesEstimationResults = createSentencesEstimationResults(sentencesDatasetsFeatures, sentencesDatasetsPitch, metadata, path2SentencesResults, path2WordModels, path2SpeakerModels, path2GenderModels, transitionMat, priorStates, trainOnLessFeatures=False, enableMahalanobisCala=False)
+            sentencesEstimationResults = createSentencesEstimationResults(sentencesDatasetsFeatures, sentencesDatasetsPitch, metadata, path2SentencesResults, path2WordModels, path2SpeakerModels, path2GenderModels, transitionMat, priorStates, trainOnLessFeatures=True, enableMahalanobisCala=False, chosenFeatures=chosenFeatures)
 
 if enablePureSentencePlots:
     sentencesEstimationResults = pickle.load(open(path2SentencesResults, "rb"))
@@ -173,3 +175,5 @@ if enableEffectSentencePlots:
     plotSentenceResults(sentencesPostEffectsEstimationResults, maleIdx, femaleIdx)
 '''
 # wordFeatureHistograms(path2WordFeatures)
+
+# plotPitchHistogramPerSentence(pickle.load(open(path2SentencesPitch, "rb")), pickle.load(open(path2SentencesResults, "rb")))
