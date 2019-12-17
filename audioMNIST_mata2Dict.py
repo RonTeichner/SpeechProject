@@ -1011,7 +1011,7 @@ def computePitchDistribution(sentence):
 def plotSentenceResults(sentencesEstimationResults, maleIdx, femaleIdx):
     # convert model first-word estimations to np-arrays:
     nSentences = len(sentencesEstimationResults)
-    classCategories = ['word', 'gender', 'speaker']
+    classCategories = ['word', 'gender', 'speaker', 'pitch']
     collectedFirstWordSentenceResults = dict()
     for estimationClass in classCategories:
         collectedFirstWordSentenceResults[estimationClass] = dict()
@@ -1034,10 +1034,13 @@ def plotSentenceResults(sentencesEstimationResults, maleIdx, femaleIdx):
                 trueSpeakerNo = int(sentenceResult['groundTruth']['SpeakerNo']) - 1
                 firstDigit_filtering[sentenceIdx] = sentenceResult['results'][estimationClass]['filtering'][0][trueSpeakerNo]
                 firstDigit_smoothing[sentenceIdx] = sentenceResult['results'][estimationClass]['smoothing'][0][trueSpeakerNo]
+            elif estimationClass == 'pitch':
+                firstDigit_filtering[sentenceIdx] = calcStdOfMixOf2(sentenceResult['results']['pitch']['filtering']['means'][:, 0], sentenceResult['results']['pitch']['filtering']['covs'][:, 0], sentenceResult['results']['pitch']['filtering']['weights'][:, 0])
+                firstDigit_smoothing[sentenceIdx] = calcStdOfMixOf2(sentenceResult['results']['pitch']['filtering']['means'][:, -1], sentenceResult['results']['pitch']['filtering']['covs'][:, -1], sentenceResult['results']['pitch']['filtering']['weights'][:, -1])
         collectedFirstWordSentenceResults[estimationClass]['filtering'] = firstDigit_filtering
         collectedFirstWordSentenceResults[estimationClass]['smoothing'] = firstDigit_smoothing
 
-    # plot first-word estimation CDFs:
+    # plot first-word estimation CDFs of true value:
     fig = plt.subplots(figsize=(24, 10))
     for plotIdx, estimationClass in enumerate(classCategories):
         plt.subplot(2, len(classCategories), plotIdx + 1)
@@ -1051,8 +1054,12 @@ def plotSentenceResults(sentencesEstimationResults, maleIdx, femaleIdx):
         plt.grid(True)
         plt.legend(loc='right')
         #plt.title(estimationClass + ' likelihood CDF; avg(R,F,S) = (%02.0f%%,%02.0f%%,%02.0f%%)' % (meanRaw * 100, meanFiltering * 100, meanSmoothing * 100))
-        plt.title(estimationClass + ' likelihood CDF; avg(F,S) = (%02.0f%%,%02.0f%%)' % (meanFiltering * 100, meanSmoothing * 100))
-        plt.xlabel('likelihood')
+        if estimationClass == 'pitch':
+            plt.title(estimationClass + ' std CDF; avg(F,S) = (%02.0f,%02.0f) Hz' % (meanFiltering, meanSmoothing))
+            plt.xlabel('Hz')
+        else:
+            plt.title(estimationClass + ' likelihood CDF; avg(F,S) = (%02.0f%%,%02.0f%%)' % (meanFiltering * 100, meanSmoothing * 100))
+            plt.xlabel('likelihood')
 
         plt.subplot(2, len(classCategories), plotIdx + 1 + len(classCategories))
         n_bins = 20
@@ -1065,9 +1072,17 @@ def plotSentenceResults(sentencesEstimationResults, maleIdx, femaleIdx):
         plt.grid(True)
         plt.legend(loc='right')
         # plt.title(estimationClass + ' likelihood CDF; avg(R,F,S) = (%02.0f%%,%02.0f%%,%02.0f%%)' % (meanRaw * 100, meanFiltering * 100, meanSmoothing * 100))
-        plt.title(estimationClass + ' likelihood histogram; avg(F,S) = (%02.0f%%,%02.0f%%)' % (meanFiltering * 100, meanSmoothing * 100))
-        plt.xlabel('likelihood')
+        if estimationClass == 'pitch':
+            plt.title(estimationClass + ' std histogram; avg(F,S) = (%02.0f,%02.0f) Hz' % (meanFiltering, meanSmoothing))
+            plt.xlabel('Hz')
+        else:
+            plt.title(estimationClass + ' likelihood histogram; avg(F,S) = (%02.0f%%,%02.0f%%)' % (meanFiltering * 100, meanSmoothing * 100))
+            plt.xlabel('likelihood')
     plt.show()
+
+
+def calcStdOfMixOf2(means, covs, weights):
+    return np.sqrt(weights[0]*covs[0] + weights[1]*covs[1] + weights[0]*np.power(means[0], 2) + weights[1]*np.power(means[1], 2) - np.power(weights[0]*means[0] + weights[1]*means[1], 2))
 
 def limitFeatures(inputFeatures, chosenFeatures=[]):
     if chosenFeatures == []:
