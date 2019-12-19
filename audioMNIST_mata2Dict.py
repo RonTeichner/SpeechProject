@@ -787,7 +787,7 @@ def categoryClassificationTrain(categoryDatasetsFeatures, path2categoryModels, t
     pickle.dump(categoryModels2Save, open(path2categoryModels, "wb"))
     return categoryModels2Save
 
-def createSentencesMetadata(metadata, path2SentencesMetadata, nSentences = 500):
+def createSentencesMetadata(metadata, path2SentencesMetadata, nSentences=500, whichSet='test'):
     # create sentence transitionMat:
     nDigits = 10
     transitionMat = np.zeros((nDigits, nDigits))
@@ -824,7 +824,12 @@ def createSentencesMetadata(metadata, path2SentencesMetadata, nSentences = 500):
             foundTest = False
             while not foundTest:
                 specificDigit = list(random.choice(metadata.metaDataDict[libraryKey]['pathsDict'][digit]))
-                foundTest = specificDigit[1] == metadata.testEnum
+                if whichSet == 'test':
+                    foundTest = specificDigit[1] == metadata.testEnum
+                elif whichSet == 'train':
+                    foundTest = specificDigit[1] == metadata.trainEnum
+                elif whichSet == 'validate':
+                    foundTest = specificDigit[1] == metadata.validateEnum
                 #if not(foundTest):
                     #print('digit = %d, sentenceIdx = %d, digitIdx = %d; testEnum not found' % (digit, sentenceIdx, digitIdx))
             sentencesMetadata[-1].append((digit, specificDigit[0]))
@@ -1078,6 +1083,8 @@ def plotSentenceResults(sentencesEstimationResults, maleIdx, femaleIdx):
         else:
             plt.title(estimationClass + ' likelihood histogram; avg(F,S) = (%02.0f%%,%02.0f%%)' % (meanFiltering * 100, meanSmoothing * 100))
             plt.xlabel('likelihood')
+    plt.savefig('./fig.png')
+    print('fig saved')
     plt.show()
 
 
@@ -1178,3 +1185,40 @@ def plotPitchHistogramPerSentence(sentencesDatasetsPitch, sentencesEstimationRes
         plt.legend()
         #plt.xlim(50, 400)
         plt.show()
+
+def createSentencesDataset(metadata, path2SentencesResults, path2SentencesMetadata, path2SentencesFeatures, path2SentencesAudio, path2SentencesPitch, path2WordModels, path2SpeakerModels, path2GenderModels, chosenFeatures, nSentences=10000, whichSet='train'):
+    if os.path.isfile(path2SentencesResults):
+        sentencesEstimationResults = pickle.load(open(path2SentencesResults, "rb"))
+        sentencesMetadataTrain, priorStates, transitionMat = pickle.load(open(path2SentencesMetadata, "rb"))
+    else:
+        # create sentences dataset:
+        if os.path.isfile(path2SentencesMetadata):
+            sentencesMetadata, priorStates, transitionMat = pickle.load(open(path2SentencesMetadata, "rb"))
+            # sentencesDatasetsAudio = pickle.load(open(path2SentencesAudio, "rb"))
+            # sd.play(sentencesDatasetsAudio[0][1][1],fs)
+            # sd.stop()
+        else:
+            sentencesMetadata, priorStates, transitionMat = createSentencesMetadata(metadata, path2SentencesMetadata, nSentences=nSentences, whichSet=whichSet)
+
+        # create\load sentences features:
+        if os.path.isfile(path2SentencesFeatures):
+            sentencesDatasetsFeatures = pickle.load(open(path2SentencesFeatures, "rb"))
+        else:
+            sentencesDatasetsFeatures = createSentenceWavs_Features(sentencesMetadata, path2SentencesAudio, path2SentencesFeatures)
+
+        # create\load sentences pitch:
+        if os.path.isfile(path2SentencesPitch):
+            sentencesDatasetsPitch = pickle.load(open(path2SentencesPitch, "rb"))
+            # plotPitchHistogramPerSentence(sentencesDatasetsPitch)
+        else:
+            sentencesMetadata, priorStates, transitionMat = pickle.load(open(path2SentencesMetadata, "rb"))
+            sentencesDatasetsPitch = createSentenceWavs_Features(sentencesMetadata, None, path2SentencesPitch, includeEffects=False, createPitch=True)
+            # plotPitchHistogramPerSentence(sentencesDatasetsPitch)
+            # The conclusion from plotting the pitch histograms per sentence is to model the sentence speach by a mixture of two Gaussians
+
+        # create\load sentences estimation results:
+        if os.path.isfile(path2SentencesResults):
+            sentencesEstimationResults = pickle.load(open(path2SentencesResults, "rb"))
+        else:
+            sentencesEstimationResults = createSentencesEstimationResults(sentencesDatasetsFeatures, sentencesDatasetsPitch, metadata, path2SentencesResults, path2WordModels, path2SpeakerModels, path2GenderModels, transitionMat, priorStates, trainOnLessFeatures=True, enableMahalanobisCala=False, chosenFeatures=chosenFeatures)
+    return sentencesEstimationResults
