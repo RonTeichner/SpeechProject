@@ -813,26 +813,39 @@ def createSentencesMetadata(metadata, path2SentencesMetadata, nSentences=500, wh
     for sentenceIdx in range(nSentences):
         print('createSentencesMetadata: starting sentence no. %d out of %d' % (sentenceIdx, nSentences))
         sentencesMetadata.append(list())
-        libraryKey = random.choice(listOfLibraryKeys)
-        sentenceLength = np.random.randint(low=min_nWordsPerSentence, high=max_nWordsPerSentence + 1)
-        sentencesMetadata[-1].append(libraryKey)
-        for digitIdx in range(sentenceLength):
-            if digitIdx == 0:
-                digit = int(np.argwhere(np.random.multinomial(1, pvals=priorStates)))
-            else:
-                digit = int(np.argwhere(np.random.multinomial(1, pvals=transitionMat[digit, :])))
-            foundTest = False
-            while not foundTest:
-                specificDigit = list(random.choice(metadata.metaDataDict[libraryKey]['pathsDict'][digit]))
-                if whichSet == 'test':
-                    foundTest = specificDigit[1] == metadata.testEnum
-                elif whichSet == 'train':
-                    foundTest = specificDigit[1] == metadata.trainEnum
-                elif whichSet == 'validate':
-                    foundTest = specificDigit[1] == metadata.validateEnum
-                #if not(foundTest):
-                    #print('digit = %d, sentenceIdx = %d, digitIdx = %d; testEnum not found' % (digit, sentenceIdx, digitIdx))
-            sentencesMetadata[-1].append((digit, specificDigit[0]))
+        nSearchIters = 1000
+        sentenceFound = False
+        while not sentenceFound:
+            specificSentence = list()
+            searchIter = 0
+            libraryKey = random.choice(listOfLibraryKeys)
+            specificSentence.append(libraryKey)
+            sentenceLength = np.random.randint(low=min_nWordsPerSentence, high=max_nWordsPerSentence + 1)
+            forBreakFlag = False
+            for digitIdx in range(sentenceLength):
+                if digitIdx == 0:
+                    digit = int(np.argwhere(np.random.multinomial(1, pvals=priorStates)))
+                else:
+                    digit = int(np.argwhere(np.random.multinomial(1, pvals=transitionMat[digit, :])))
+                foundTest = False
+                while not foundTest:
+                    specificDigit = list(random.choice(metadata.metaDataDict[libraryKey]['pathsDict'][digit]))
+                    if whichSet == 'test':
+                        foundTest = specificDigit[1] == metadata.testEnum
+                    elif whichSet == 'train':
+                        foundTest = specificDigit[1] == metadata.trainEnum
+                    elif whichSet == 'validate':
+                        foundTest = specificDigit[1] == metadata.validateEnum
+                    #if not(foundTest):
+                        #print('digit = %d, sentenceIdx = %d, digitIdx = %d; testEnum not found' % (digit, sentenceIdx, digitIdx))
+                    searchIter += 1
+                    if searchIter > nSearchIters:
+                        forBreakFlag = True
+                        break
+                if foundTest: specificSentence.append((digit, specificDigit[0]))
+                if digitIdx == (sentenceLength-1) and foundTest: sentenceFound=True
+                if forBreakFlag: break
+        sentencesMetadata[-1] = specificSentence
     pickle.dump([sentencesMetadata, priorStates, transitionMat], open(path2SentencesMetadata, "wb"))
     return sentencesMetadata, priorStates, transitionMat
 
@@ -842,6 +855,7 @@ def createSentenceWavs_Features(sentencesMetadata, path2SentencesAudio, path2Sen
 
     sentencesAudio = deepcopy(sentencesMetadata)
     sentencesFeatures = deepcopy(sentencesMetadata)
+    nPitchErrors = 0
     for sentenceIdx, sentenceMetadata in enumerate(sentencesMetadata):
         if sentenceIdx % 100 == 0:
             print('createSentenceWavs_Features: starting sentence %d out of %d' % (sentenceIdx, len(sentencesMetadata)))
@@ -857,8 +871,14 @@ def createSentenceWavs_Features(sentencesMetadata, path2SentencesAudio, path2Sen
                 sentencesFeatures[sentenceIdx][wordIdx] = (digit, np.float32(extract_features(wav, fs)))
             else:
                 signal = basic.SignalObj(filename)
-                pitch = pYAAPT.yaapt(signal)
-                sentencesFeatures[sentenceIdx][wordIdx] = (digit, np.float32(pitch.samp_values))
+                try:
+                    pitch = pYAAPT.yaapt(signal)
+                    sentencesFeatures[sentenceIdx][wordIdx] = (digit, np.float32(pitch.samp_values))
+                except:
+                    sentencesFeatures[sentenceIdx][wordIdx] = (digit, -1.0)
+                    nPitchErrors += 1
+                    print('createSentenceWavs_Features: no. of pitch errors: %d' % nPitchErrors)
+    print('createSentenceWavs_Features: no. of pitch errors: %d' % nPitchErrors)
     if path2SentencesAudio is not None: pickle.dump(sentencesAudio, open(path2SentencesAudio, "wb"))
     pickle.dump(sentencesFeatures, open(path2SentencesFeatures, "wb"))
     return sentencesFeatures
@@ -984,13 +1004,17 @@ def computePitchDistribution(sentence):
     filteringMeans = np.zeros((n_components, len(sentence)-1))
     filteringCovs = np.zeros((n_components, len(sentence) - 1))
     filteringWeights = np.zeros((n_components, len(sentence)-1))
+    pitchValuesWereExtracted = False
     for wordIdx, word in enumerate(sentence):
         if wordIdx == 0:
             speakerNo = int(word)
             continue
+        if np.max(word[1]) == -1:
+            continue  # no pitch values were extracted
         pitchIndexes = word[1].nonzero()
         pitchValues = word[1][pitchIndexes]
-        if wordIdx == 1:
+        if not pitchValuesWereExtracted:
+            pitchValuesWereExtracted = True
             allPitchValues = pitchValues
         else:
             allPitchValues = np.hstack((allPitchValues, pitchValues))
@@ -1013,7 +1037,7 @@ def computePitchDistribution(sentence):
         plt.show()
     return filteringDict, smoothingDict
 
-def plotSentenceResults(sentencesEstimationResults, maleIdx, femaleIdx):
+def plotSentenceResults(sentencesEstimationResults, maleIdx, femaleIdx, path2fig):
     # convert model first-word estimations to np-arrays:
     nSentences = len(sentencesEstimationResults)
     classCategories = ['word', 'gender', 'speaker', 'pitch']
@@ -1083,7 +1107,7 @@ def plotSentenceResults(sentencesEstimationResults, maleIdx, femaleIdx):
         else:
             plt.title(estimationClass + ' likelihood histogram; avg(F,S) = (%02.0f%%,%02.0f%%)' % (meanFiltering * 100, meanSmoothing * 100))
             plt.xlabel('likelihood')
-    plt.savefig('./fig.png')
+    plt.savefig(path2fig)
     print('fig saved')
     plt.show()
 

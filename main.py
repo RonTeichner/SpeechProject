@@ -124,8 +124,8 @@ if enableWordDetection:
         wordModels = categoryClassificationTrain(wordDatasetsFeatures, path2WordModels, type='words', trainOnLessFeatures=True, chosenFeatures=chosenFeatures)
 
 if enableSentenceDetection:
-    createSentencesDataset(metadata, path2SentencesResultsTrain, path2SentencesMetadataTrain, path2SentencesFeaturesTrain, path2SentencesAudioTrain, path2SentencesPitchTrain, path2WordModels, path2SpeakerModels, path2GenderModels, chosenFeatures, nSentences=10000, whichSet='train')
-    createSentencesDataset(metadata, path2SentencesResultsValidate, path2SentencesMetadataValidate, path2SentencesFeaturesValidate, path2SentencesAudioValidate, path2SentencesPitchValidate, path2WordModels, path2SpeakerModels, path2GenderModels, chosenFeatures, nSentences=1000, whichSet='validate')
+    sentencesEstimationResultsTrain = createSentencesDataset(metadata, path2SentencesResultsTrain, path2SentencesMetadataTrain, path2SentencesFeaturesTrain, path2SentencesAudioTrain, path2SentencesPitchTrain, path2WordModels, path2SpeakerModels, path2GenderModels, chosenFeatures, nSentences=10000, whichSet='train')
+    sentencesEstimationResultsValidate = createSentencesDataset(metadata, path2SentencesResultsValidate, path2SentencesMetadataValidate, path2SentencesFeaturesValidate, path2SentencesAudioValidate, path2SentencesPitchValidate, path2WordModels, path2SpeakerModels, path2GenderModels, chosenFeatures, nSentences=1000, whichSet='validate')
     createSentencesDataset(metadata, path2SentencesResultsTest, path2SentencesMetadataTest, path2SentencesFeaturesTest, path2SentencesAudioTest, path2SentencesPitchTest, path2WordModels, path2SpeakerModels, path2GenderModels, chosenFeatures, nSentences=2000, whichSet='test')
 
 if enablePureSentencePlots:
