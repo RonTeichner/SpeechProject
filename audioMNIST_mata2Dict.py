@@ -1246,3 +1246,29 @@ def createSentencesDataset(metadata, path2SentencesResults, path2SentencesMetada
         else:
             sentencesEstimationResults = createSentencesEstimationResults(sentencesDatasetsFeatures, sentencesDatasetsPitch, metadata, path2SentencesResults, path2WordModels, path2SpeakerModels, path2GenderModels, transitionMat, priorStates, trainOnLessFeatures=True, enableMahalanobisCala=False, chosenFeatures=chosenFeatures)
     return sentencesEstimationResults
+
+def sampleFromSmoothing(sentencesEstimationResults):
+    sentencesEstimationResults_sampled = np.zeros((len(sentencesEstimationResults), 4)) # saving as matrix. every row has [gender, speaker, word, pitch]
+    for sentenceIdx, sentence in enumerate(sentencesEstimationResults):
+        sentenceResults = sentence['results']
+        # extract multinomial probs:
+        genderProbs, speakerProbs, wordProbs = sentenceResults['gender']['smoothing'][0], sentenceResults['speaker']['smoothing'][0], sentenceResults['word']['smoothing'][0]
+        # sample:
+        sampledGender, sampledSpeaker, sampledWord = int(np.argwhere(np.random.multinomial(1, pvals=genderProbs))), int(np.argwhere(np.random.multinomial(1, pvals=speakerProbs))), int(np.argwhere(np.random.multinomial(1, pvals=wordProbs)))
+        sampledPitchMixture = int(np.argwhere(np.random.multinomial(1, pvals=sentenceResults['pitch']['smoothing']['weights'])))
+        pitchMean, pitchStd = sentenceResults['pitch']['smoothing']['means'][sampledPitchMixture], np.sqrt(sentenceResults['pitch']['smoothing']['covs'][sampledPitchMixture])
+        sampledPitch = np.random.normal(loc=pitchMean, scale=pitchStd)
+        sentencesEstimationResults_sampled[sentenceIdx] = np.array([sampledGender, sampledSpeaker, sampledWord, sampledPitch])
+    return sentencesEstimationResults_sampled
+
+def generateAudioMatrix(sentencesDatasetsAudio):
+    maxSentenceLengh = 0
+    for sentenceIdx, sentence in enumerate(sentencesDatasetsAudio):
+        if len(sentence[1][1]) > maxSentenceLengh: maxSentenceLengh = len(sentence[1][1])
+    sentenceAudioMat = np.zeros((len(sentencesDatasetsAudio), maxSentenceLengh))
+    for sentenceIdx, sentence in enumerate(sentencesDatasetsAudio):
+        wav = sentence[1][1]
+        zeroPaddedWav = np.concatenate((np.zeros(maxSentenceLengh - len(wav)), wav))
+        sentenceAudioMat[sentenceIdx] = zeroPaddedWav
+    return sentenceAudioMat
+
