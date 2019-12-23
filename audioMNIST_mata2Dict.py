@@ -1,3 +1,7 @@
+import torch
+import torch.utils.data
+from torch import nn, optim
+from torch.nn import functional as F
 import os
 import numpy as np
 from scipy.io import wavfile
@@ -1271,4 +1275,140 @@ def generateAudioMatrix(sentencesDatasetsAudio):
         zeroPaddedWav = np.concatenate((np.zeros(maxSentenceLengh - len(wav)), wav))
         sentenceAudioMat[sentenceIdx] = zeroPaddedWav
     return sentenceAudioMat
+
+class VAE(nn.Module):
+    def __init__(self, measDim, lstmHiddenSize, lstmNumLayers, nDrawsFromSingleEncoderOutput, zDim):
+        super(VAE, self).__init__()
+
+        self.nDrawsFromSingleEncoderOutput = nDrawsFromSingleEncoderOutput
+
+        self.zDim = zDim
+        self.decoderInnerWidth = 5
+        self.genderMultivariate = 2
+        self.speakerMultivariate = 60
+        self.wordMultivariate = 10
+        self.nContinuesParameters = 1 # pitch
+
+        # encoder:
+        self.kalmanLSTM = nn.LSTM(input_size=measDim, hidden_size=lstmHiddenSize, num_layers=lstmNumLayers)
+        self.fc21 = nn.Linear(lstmHiddenSize, self.zDim)
+        self.fc22 = nn.Linear(lstmHiddenSize, self.zDim)
+
+        # decoder:
+        self.fc3 = nn.Linear(self.zDim, self.decoderInnerWidth)
+        # self.fc4 = nn.Linear(self.decoderInnerWidth, self.decoderInnerWidth)
+        self.fc5 = nn.Linear(self.decoderInnerWidth, self.genderMultivariate + self.speakerMultivariate + self.wordMultivariate + 2*self.nContinuesParameters)
+
+        # general:
+        self.logSoftMax = nn.LogSoftmax(dim=1)
+        self.LeakyReLU = nn.LeakyReLU()
+        self.tanh = nn.Tanh()
+
+
+    def encode(self, y):
+        output, (hn, cn) = self.kalmanLSTM(y)
+        return self.fc21(hn[0]), self.fc22(hn[0])
+
+    def reparameterize(self, mu, logvar):
+        std = torch.exp(0.5*logvar)
+        eps = torch.randn_like(std)
+        return mu + eps*std
+
+    def decode(self, z):
+        h3 = self.LeakyReLU(self.fc3(z))
+        #h4 = self.tanh(self.fc4(h3))
+        #return self.logSoftMax(self.fc5(h3)) # h3 here performed good without p(z) constrain
+        #return torch.sigmoid(self.fc5(h3))  # h3 here performed good without p(z) constrain
+        h5 = self.fc5(h3)
+        return h5 # h3 here performed good without p(z) constrain
+
+    def forward(self, y):
+        mu, logvar = self.encode(y)
+        z = self.reparameterize(mu.repeat(self.nDrawsFromSingleEncoderOutput, 1), logvar.repeat(self.nDrawsFromSingleEncoderOutput, 1))
+        decoderOut = self.decode(z)
+        genderProbs, speakerProbs, wordProbs, pitchMean, pitchLogVar = decoderOut[:, :self.genderMultivariate], decoderOut[:, self.genderMultivariate:self.genderMultivariate+self.speakerMultivariate], decoderOut[:, self.genderMultivariate+self.speakerMultivariate : self.genderMultivariate+self.speakerMultivariate+self.wordMultivariate], decoderOut[:, self.genderMultivariate+self.speakerMultivariate+self.wordMultivariate : self.genderMultivariate+self.speakerMultivariate+self.wordMultivariate+1], decoderOut[:, self.genderMultivariate+self.speakerMultivariate+self.wordMultivariate+1 : self.genderMultivariate+self.speakerMultivariate+self.wordMultivariate+2]
+        return genderProbs, speakerProbs, wordProbs, pitchMean, pitchLogVar, mu, logvar  # , z
+
+
+# takes in a module and applies the specified weight initialization
+def weights_init_uniform_rule(m):
+    classname = m.__class__.__name__
+    # for every Linear layer in a model..
+    if classname.find('Linear') != -1:
+        # get the number of the inputs
+        n = m.in_features
+        y = 1.0 / np.sqrt(n)
+        m.weight.data.uniform_(-y, y)
+        m.bias.data.fill_(0)
+
+
+def loss_function(mu, logvar, genderProbs, speakerProbs, wordProbs, pitchMean, pitchLogVar, sampledGender, sampledSpeaker, sampledWord, sampledPitch, nDecoders):
+    batchSize = sampledWord.numel()
+    sampledWord, sampledGender, sampledSpeaker, sampledPitch = sampledWord.unsqueeze(1).repeat(nDecoders, 1).reshape(-1), sampledGender.unsqueeze(1).repeat(nDecoders, 1).reshape(-1), sampledSpeaker.unsqueeze(1).repeat(nDecoders, 1).reshape(-1), sampledPitch.unsqueeze(1).repeat(nDecoders, 1).reshape(-1)
+
+    genderNLL = F.cross_entropy(genderProbs, sampledGender, reduction='none')
+    speakerNLL = F.cross_entropy(speakerProbs, sampledSpeaker, reduction='none')
+    wordNLL = F.cross_entropy(wordProbs, sampledWord, reduction='none')
+
+    pitchMean = torch.squeeze(pitchMean)
+    pitchLogVar = torch.squeeze(pitchLogVar)
+
+    pitchNLL = -torch.mul(pitchLogVar, 0.5) - torch.mul(torch.pow(torch.div(sampledPitch - pitchMean, torch.exp(torch.mul(pitchLogVar, 0.5))), 2), 0.5)
+    '''
+    t = time.time()
+    pitchNLL = [torch.distributions.normal.Normal(pitchMean[pitchIdx], pitchLogVar[pitchIdx].mul(0.5).exp_()).log_prob(sampledPitch[pitchIdx]) for pitchIdx in range(pitchMean.shape[0])]
+    print('loss function - pitch for duration: ', time.time() - t, ' sec')
+    '''
+    '''
+    t = time.time()
+    pitchNLL = torch.zeros(pitchMean.shape[0]).cuda()
+    print('loss function - pitch cuda upload duration: ', time.time() - t, ' sec')
+    
+    t = time.time()
+    for pitchIdx in range(pitchMean.shape[0]):
+        pitchNLL[pitchIdx] = -torch.distributions.normal.Normal(pitchMean[pitchIdx], pitchLogVar[pitchIdx].mul(0.5).exp_()).log_prob(sampledPitch[pitchIdx])
+    print('loss function - pitch for duration: ', time.time() - t, ' sec')
+    '''
+
+    totalNLL_max = (genderNLL+speakerNLL+wordNLL+pitchNLL).reshape(-1, batchSize).max(dim=0)[0].sum()  # each column has the nDecoders different outputs from the same encoder's output, then max is performed
+    # torch.exp(torch.mul(pitchLogVar, 0.5))
+
+    KLD = -0.5 * torch.sum(1 + logvar - mu.pow(2) - logvar.exp())
+
+    return KLD + totalNLL_max
+
+def trainFunc(sentencesAudioInputMatrix, sentencesEstimationResults_sampled, sentencesEstimationPitchResults_sampled, model, optimizer, validateOnly=False):
+    if validateOnly:
+        model.eval()
+    else:
+        model.train()
+
+    total_loss = 0
+
+    batchSize = 200
+    nSentences = sentencesAudioInputMatrix.shape[0]
+    nBatches = int(nSentences/batchSize)
+    nDecoders = model.nDrawsFromSingleEncoderOutput
+
+    inputSentenceIndexes = torch.randperm(nSentences)
+    sentencesAudioInputMatrix, sentencesEstimationResults_sampled, sentencesEstimationPitchResults_sampled = sentencesAudioInputMatrix[inputSentenceIndexes], sentencesEstimationResults_sampled[inputSentenceIndexes], sentencesEstimationPitchResults_sampled[inputSentenceIndexes]
+
+    for batchIdx in range(nBatches):
+        if batchIdx % 10 == 0: print('starting batch %d out of %d' % (batchIdx, nBatches))
+        data = sentencesAudioInputMatrix[batchIdx * batchSize:(batchIdx + 1) * batchSize].transpose(1,0).unsqueeze_(2).float()
+        labels, pitchLabels = sentencesEstimationResults_sampled[batchIdx * batchSize:(batchIdx + 1) * batchSize].long(), sentencesEstimationPitchResults_sampled[batchIdx * batchSize:(batchIdx + 1) * batchSize].float()
+        sampledGender, sampledSpeaker, sampledWord, sampledPitch = labels[:, 0], labels[:, 1], labels[:, 2], pitchLabels[:, 0]
+
+        if not validateOnly: optimizer.zero_grad()
+        genderProbs, speakerProbs, wordProbs, pitchMean, pitchLogVar, mu, logvar = model(data)
+        # t = time.time()
+        loss = loss_function(mu, logvar, genderProbs, speakerProbs, wordProbs, pitchMean, pitchLogVar, sampledGender, sampledSpeaker, sampledWord, sampledPitch, model.nDrawsFromSingleEncoderOutput)
+        # print('loss function duration: ', 1000*(time.time()-t), ' ms')
+        if not validateOnly: loss.backward()
+        total_loss += loss.item() / batchSize
+        if not validateOnly: optimizer.step()
+
+        if validateOnly:
+            likelyGender, likelySpeaker, likelyWord, likelyPitch = sampleLikelyMember(genderProbs, speakerProbs, wordProbs, pitchMean, pitchLogVar)
+    return total_loss / nBatches
 
