@@ -13,6 +13,7 @@ import pickle
 from hmmlearn.hmm import GMMHMM as GMMHMM
 from hmmlearn.utils import log_normalize
 from sklearn.mixture import GaussianMixture
+from sklearn.cluster import KMeans
 from pysndfx import AudioEffectsChain
 from copy import deepcopy
 import amfm_decompy.pYAAPT as pYAAPT
@@ -1377,6 +1378,24 @@ def loss_function(mu, logvar, genderProbs, speakerProbs, wordProbs, pitchMean, p
 
     return KLD + totalNLL_max
 
+def sampleLikelyMember(genderProbs, speakerProbs, wordProbs, pitchMean, pitchLogVar, nDecoders):
+    batchSize = int(genderProbs.shape[0]/nDecoders)
+    n_clusters = 3
+    mostLikelyValues = np.zeros((batchSize, 4))
+    # the nDecoders samples for input no. i to the encoder is at genderProbs[:, i, :] :
+    genderProbs, speakerProbs, wordProbs, pitchMean, pitchLogVar = genderProbs.reshape(nDecoders, batchSize, -1), speakerProbs.reshape(nDecoders, batchSize, -1), wordProbs.reshape(nDecoders, batchSize, -1), pitchMean.reshape(nDecoders, batchSize, -1), pitchLogVar.reshape(nDecoders, batchSize, -1)
+    for batchIdx in range(batchSize):
+        singleInputGenderProb, singleInputSpeakerProb, singleInputWordProb, singleInputPitchMean, singleInputPitchStd = genderProbs[:, batchIdx, :], speakerProbs[:, batchIdx, :], wordProbs[:, batchIdx, :], pitchMean[:, batchIdx, :], np.exp(np.multiply(pitchLogVar[:, batchIdx, :], 0.5))
+        sampledGender, sampledSpeaker, sampledWord, sampledPitch = np.zeros((nDecoders, 1)), np.zeros((nDecoders, 1)), np.zeros((nDecoders, 1)), np.zeros((nDecoders, 1))
+        for decoderIdx in range(nDecoders):
+            sampledGender[decoderIdx], sampledSpeaker[decoderIdx], sampledWord[decoderIdx], sampledPitch[decoderIdx] = int(np.argwhere(np.random.multinomial(1, pvals=singleInputGenderProb[decoderIdx]))), int(np.argwhere(np.random.multinomial(1, pvals=singleInputSpeakerProb[decoderIdx]))), int(np.argwhere(np.random.multinomial(1, pvals=singleInputWordProb[decoderIdx]))), np.random.normal(loc=singleInputPitchMean[decoderIdx], scale=singleInputPitchStd[decoderIdx])
+        kmeans = KMeans(n_clusters=n_clusters).fit(np.concatenate((sampledGender, sampledSpeaker, sampledWord, sampledPitch), axis=1))
+        clustersWeights = [(kmeans.labels_ == clusterIdx).sum()/nDecoders for clusterIdx in range(n_clusters)]
+        mostLikelyCluster = np.argmax(clustersWeights)
+        mostLikelyValues[batchIdx] = kmeans.cluster_centers_[mostLikelyCluster]
+    likelyGender, likelySpeaker, likelyWord, likelyPitch = mostLikelyValues[:, 0], mostLikelyValues[:, 1], mostLikelyValues[:, 2], mostLikelyValues[:, 3]
+    return likelyGender, likelySpeaker, likelyWord, likelyPitch
+
 def trainFunc(sentencesAudioInputMatrix, sentencesEstimationResults_sampled, sentencesEstimationPitchResults_sampled, model, optimizer, validateOnly=False):
     if validateOnly:
         model.eval()
@@ -1392,7 +1411,7 @@ def trainFunc(sentencesAudioInputMatrix, sentencesEstimationResults_sampled, sen
 
     inputSentenceIndexes = torch.randperm(nSentences)
     sentencesAudioInputMatrix, sentencesEstimationResults_sampled, sentencesEstimationPitchResults_sampled = sentencesAudioInputMatrix[inputSentenceIndexes], sentencesEstimationResults_sampled[inputSentenceIndexes], sentencesEstimationPitchResults_sampled[inputSentenceIndexes]
-
+    if validateOnly: likelyGender, likelySpeaker, likelyWord, likelyPitch = np.zeros(nSentences), np.zeros(nSentences), np.zeros(nSentences), np.zeros(nSentences)
     for batchIdx in range(nBatches):
         if batchIdx % 10 == 0: print('starting batch %d out of %d' % (batchIdx, nBatches))
         data = sentencesAudioInputMatrix[batchIdx * batchSize:(batchIdx + 1) * batchSize].transpose(1,0).unsqueeze_(2).float()
@@ -1408,7 +1427,8 @@ def trainFunc(sentencesAudioInputMatrix, sentencesEstimationResults_sampled, sen
         total_loss += loss.item() / batchSize
         if not validateOnly: optimizer.step()
 
-        if validateOnly:
-            likelyGender, likelySpeaker, likelyWord, likelyPitch = sampleLikelyMember(genderProbs, speakerProbs, wordProbs, pitchMean, pitchLogVar)
-    return total_loss / nBatches
+        if validateOnly: likelyGender[batchIdx * batchSize:(batchIdx + 1) * batchSize], likelySpeaker[batchIdx * batchSize:(batchIdx + 1) * batchSize], likelyWord[batchIdx * batchSize:(batchIdx + 1) * batchSize], likelyPitch[batchIdx * batchSize:(batchIdx + 1) * batchSize] = sampleLikelyMember(F.softmax(genderProbs, dim=1).cpu().detach().numpy(), F.softmax(speakerProbs, dim=1).cpu().detach().numpy(), F.softmax(wordProbs, dim=1).cpu().detach().numpy(), F.softmax(pitchMean, dim=1).cpu().detach().numpy(), F.softmax(pitchLogVar, dim=1).cpu().detach().numpy(), nDecoders)
+    if validateOnly: likelyList = [likelyGender, likelySpeaker, likelyWord, likelyPitch]
+    else: likelyList = []
+    return total_loss / nBatches, likelyList
 

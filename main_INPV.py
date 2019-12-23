@@ -72,7 +72,7 @@ sentencesAudioInputMatrixTrain = generateAudioMatrix(sentencesDatasetsAudioTrain
 model = VAE(measDim=1, lstmHiddenSize=12, lstmNumLayers=1, nDrawsFromSingleEncoderOutput=100, zDim=10).cuda()
 optimizer = optim.Adam(model.parameters(), lr=1e-4)
 
-nSentencesForTrain = sentencesEstimationResultsTrain_sampled.shape[0]  # 1000
+nSentencesForTrain = 400  # sentencesEstimationResultsTrain_sampled.shape[0]  # 1000
 
 sentencesEstimationPitchResultsTrain_sampled = torch.tensor(sentencesEstimationResultsTrain_sampled[:nSentencesForTrain, 3:4], dtype=torch.float16).cuda()
 sentencesEstimationResultsTrain_sampled = torch.tensor(sentencesEstimationResultsTrain_sampled[:nSentencesForTrain, :3], dtype=torch.uint8).cuda()
@@ -87,8 +87,8 @@ sentencesEstimationResultsValidate_sampled = torch.tensor(sentencesEstimationRes
 
 nEpochs = 100
 for epochIdx in range(nEpochs):
-    trainLoss = trainFunc(sentencesAudioInputMatrixTrain, sentencesEstimationResultsTrain_sampled, sentencesEstimationPitchResultsTrain_sampled, model, optimizer)
-    validateLoss = trainFunc(sentencesAudioInputMatrixValidate, sentencesEstimationResultsValidate_sampled, sentencesEstimationPitchResultsValidate_sampled, model, optimizer, validateOnly=True)
+    trainLoss, _ = trainFunc(sentencesAudioInputMatrixTrain, sentencesEstimationResultsTrain_sampled, sentencesEstimationPitchResultsTrain_sampled, model, optimizer)
+    validateLoss, likelyList = trainFunc(sentencesAudioInputMatrixValidate, sentencesEstimationResultsValidate_sampled, sentencesEstimationPitchResultsValidate_sampled, model, optimizer, validateOnly=True)
     print(f'train loss: {trainLoss}; validation loss: {validateLoss}')
 
 
