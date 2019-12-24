@@ -57,6 +57,9 @@ path2SentencesPitchTest = './SentencesPitchTest.pt'
 path2SentencesResultsTest = './SentencesResultsTest.pt'
 path2FigTest = './SentencesFigTest.png'
 
+nGenders = 2
+femaleIdx, maleIdx = np.arange(nGenders)
+
 sentencesDatasetsAudioTrain = pickle.load(open(path2SentencesAudioTrain, "rb"))
 sentencesEstimationResultsTrain = pickle.load(open(path2SentencesResultsTrain, "rb"))
 
@@ -72,7 +75,7 @@ sentencesAudioInputMatrixTrain = generateAudioMatrix(sentencesDatasetsAudioTrain
 model = VAE(measDim=1, lstmHiddenSize=12, lstmNumLayers=1, nDrawsFromSingleEncoderOutput=100, zDim=10).cuda()
 optimizer = optim.Adam(model.parameters(), lr=1e-4)
 
-nSentencesForTrain = 400  # sentencesEstimationResultsTrain_sampled.shape[0]  # 1000
+nSentencesForTrain = sentencesEstimationResultsTrain_sampled.shape[0]  # 1000
 
 sentencesEstimationPitchResultsTrain_sampled = torch.tensor(sentencesEstimationResultsTrain_sampled[:nSentencesForTrain, 3:4], dtype=torch.float16).cuda()
 sentencesEstimationResultsTrain_sampled = torch.tensor(sentencesEstimationResultsTrain_sampled[:nSentencesForTrain, :3], dtype=torch.uint8).cuda()
@@ -88,8 +91,10 @@ sentencesEstimationResultsValidate_sampled = torch.tensor(sentencesEstimationRes
 nEpochs = 100
 for epochIdx in range(nEpochs):
     trainLoss, _ = trainFunc(sentencesAudioInputMatrixTrain, sentencesEstimationResultsTrain_sampled, sentencesEstimationPitchResultsTrain_sampled, model, optimizer)
-    validateLoss, likelyList = trainFunc(sentencesAudioInputMatrixValidate, sentencesEstimationResultsValidate_sampled, sentencesEstimationPitchResultsValidate_sampled, model, optimizer, validateOnly=True)
-    print(f'train loss: {trainLoss}; validation loss: {validateLoss}')
+    if epochIdx % 10 == 0:
+        validateLoss, probabilitiesLUT = trainFunc(sentencesAudioInputMatrixValidate, sentencesEstimationResultsValidate_sampled, sentencesEstimationPitchResultsValidate_sampled, model, optimizer, validateOnly=True)
+        print(f'train loss: {trainLoss}; validation loss: {validateLoss}')
+        plotSentenceResults(sentencesEstimationResultsValidate, maleIdx, femaleIdx, path2FigValidate.split('.png')[0] + '_epoch_%d' % epochIdx + '.png', sentencesEstimationResults_NN=probabilitiesLUT)
 
 
 

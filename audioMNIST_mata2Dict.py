@@ -14,6 +14,8 @@ from hmmlearn.hmm import GMMHMM as GMMHMM
 from hmmlearn.utils import log_normalize
 from sklearn.mixture import GaussianMixture
 from sklearn.cluster import KMeans
+from sklearn.metrics import pairwise_distances_argmin_min
+from sklearn.preprocessing import StandardScaler
 from pysndfx import AudioEffectsChain
 from copy import deepcopy
 import amfm_decompy.pYAAPT as pYAAPT
@@ -1042,20 +1044,25 @@ def computePitchDistribution(sentence):
         plt.show()
     return filteringDict, smoothingDict
 
-def plotSentenceResults(sentencesEstimationResults, maleIdx, femaleIdx, path2fig):
+def plotSentenceResults(sentencesEstimationResults, maleIdx, femaleIdx, path2fig, sentencesEstimationResults_NN=None):
     # convert model first-word estimations to np-arrays:
+    genderIdx_NN, speakerIdx_NN, wordIdx_NN, pitchIdx_NN = np.arange(4)
     nSentences = len(sentencesEstimationResults)
     classCategories = ['word', 'gender', 'speaker', 'pitch']
     collectedFirstWordSentenceResults = dict()
     for estimationClass in classCategories:
         collectedFirstWordSentenceResults[estimationClass] = dict()
-        firstDigit_filtering, firstDigit_smoothing, firstDigit_raw = np.zeros(nSentences), np.zeros(nSentences), np.zeros(nSentences)
+        firstDigit_filtering, firstDigit_smoothing, firstDigit_INPV = np.zeros(nSentences), np.zeros(nSentences), np.zeros(nSentences)
         for sentenceIdx in range(nSentences):
             sentenceResult = sentencesEstimationResults[sentenceIdx]
+            if sentencesEstimationResults_NN is not None: weights_NN, LUT_NN = sentencesEstimationResults_NN[sentenceIdx]
             if estimationClass == 'word':
                 trueFirstDigit = sentenceResult['groundTruth']['Digits'][0]
                 firstDigit_filtering[sentenceIdx] = sentenceResult['results'][estimationClass]['filtering'][0][trueFirstDigit]
                 firstDigit_smoothing[sentenceIdx] = sentenceResult['results'][estimationClass]['smoothing'][0][trueFirstDigit]
+                if sentencesEstimationResults_NN is not None:
+                    trueValIndexesInLUT = np.where(LUT_NN[:, wordIdx_NN] == trueFirstDigit)[0]
+                    firstDigit_INPV[sentenceIdx] = np.sum([weights_NN[i] for i in trueValIndexesInLUT])
             elif estimationClass == 'gender':
                 trueGender = sentenceResult['groundTruth']['SpeakerGender']
                 if trueGender == 'male':
@@ -1064,54 +1071,92 @@ def plotSentenceResults(sentencesEstimationResults, maleIdx, femaleIdx, path2fig
                     trueGenderIdx = femaleIdx
                 firstDigit_filtering[sentenceIdx] = sentenceResult['results'][estimationClass]['filtering'][0][trueGenderIdx]
                 firstDigit_smoothing[sentenceIdx] = sentenceResult['results'][estimationClass]['smoothing'][0][trueGenderIdx]
+                if sentencesEstimationResults_NN is not None:
+                    trueValIndexesInLUT = np.where(LUT_NN[:, genderIdx_NN] == trueGenderIdx)[0]
+                    firstDigit_INPV[sentenceIdx] = np.sum([weights_NN[i] for i in trueValIndexesInLUT])
             elif estimationClass == 'speaker':
                 trueSpeakerNo = int(sentenceResult['groundTruth']['SpeakerNo']) - 1
                 firstDigit_filtering[sentenceIdx] = sentenceResult['results'][estimationClass]['filtering'][0][trueSpeakerNo]
                 firstDigit_smoothing[sentenceIdx] = sentenceResult['results'][estimationClass]['smoothing'][0][trueSpeakerNo]
+                if sentencesEstimationResults_NN is not None:
+                    trueValIndexesInLUT = np.where(LUT_NN[:, speakerIdx_NN] == trueSpeakerNo)[0]
+                    firstDigit_INPV[sentenceIdx] = np.sum([weights_NN[i] for i in trueValIndexesInLUT])
             elif estimationClass == 'pitch':
                 firstDigit_filtering[sentenceIdx] = calcStdOfMixOf2(sentenceResult['results']['pitch']['filtering']['means'][:, 0], sentenceResult['results']['pitch']['filtering']['covs'][:, 0], sentenceResult['results']['pitch']['filtering']['weights'][:, 0])
                 firstDigit_smoothing[sentenceIdx] = calcStdOfMixOf2(sentenceResult['results']['pitch']['filtering']['means'][:, -1], sentenceResult['results']['pitch']['filtering']['covs'][:, -1], sentenceResult['results']['pitch']['filtering']['weights'][:, -1])
+                if sentencesEstimationResults_NN is not None:
+                    pitchValues_NN = LUT_NN[:, pitchIdx_NN]
+                    pitchMean_NN = pitchValues_NN.mean()
+                    pitchVar = np.sum(np.multiply(weights_NN, np.power(pitchValues_NN-pitchMean_NN, 2)))
+                    firstDigit_INPV[sentenceIdx] = np.sqrt(pitchVar)
         collectedFirstWordSentenceResults[estimationClass]['filtering'] = firstDigit_filtering
         collectedFirstWordSentenceResults[estimationClass]['smoothing'] = firstDigit_smoothing
+        if sentencesEstimationResults_NN is not None:
+            collectedFirstWordSentenceResults[estimationClass]['INPV'] = firstDigit_INPV
 
     # plot first-word estimation CDFs of true value:
     fig = plt.subplots(figsize=(24, 10))
+    plt.suptitle('Likelihoods - CDF & Histograms', fontsize=16)
     for plotIdx, estimationClass in enumerate(classCategories):
         plt.subplot(2, len(classCategories), plotIdx + 1)
         n_bins = 100
         #n, bins, patches = plt.hist(collectedFirstWordSentenceResults[estimationClass]['rawFrameMahalanobis'], n_bins, density=True, histtype='step', cumulative=True, label='Raw')
         n, bins, patches = plt.hist(collectedFirstWordSentenceResults[estimationClass]['filtering'], n_bins, density=True, histtype='step', cumulative=True, label='Filtering')
         n, bins, patches = plt.hist(collectedFirstWordSentenceResults[estimationClass]['smoothing'], n_bins, density=True, histtype='step', cumulative=True, label='Smoothing')
+        if sentencesEstimationResults_NN is not None:
+            n, bins, patches = plt.hist(collectedFirstWordSentenceResults[estimationClass]['INPV'], n_bins, density=True, histtype='step', cumulative=True, label='INPV')
         #meanRaw = collectedFirstWordSentenceResults[estimationClass]['rawFrameMahalanobis'].mean()
         meanFiltering = collectedFirstWordSentenceResults[estimationClass]['filtering'].mean()
         meanSmoothing = collectedFirstWordSentenceResults[estimationClass]['smoothing'].mean()
+        if sentencesEstimationResults_NN is not None:
+            meanINPV = collectedFirstWordSentenceResults[estimationClass]['INPV'].mean()
         plt.grid(True)
         plt.legend(loc='right')
         #plt.title(estimationClass + ' likelihood CDF; avg(R,F,S) = (%02.0f%%,%02.0f%%,%02.0f%%)' % (meanRaw * 100, meanFiltering * 100, meanSmoothing * 100))
-        if estimationClass == 'pitch':
-            plt.title(estimationClass + ' std CDF; avg(F,S) = (%02.0f,%02.0f) Hz' % (meanFiltering, meanSmoothing))
-            plt.xlabel('Hz')
+        if sentencesEstimationResults_NN is not None:
+            if estimationClass == 'pitch':
+                plt.title(estimationClass + ' std avg(F,S) = (%02.0f,%02.0f,%02.0f) Hz' % (meanFiltering, meanSmoothing, meanINPV))
+                plt.xlabel('Hz')
+            else:
+                plt.title(estimationClass + ' avg(F,S) = (%02.0f%%,%02.0f%%,%02.0f%%)' % (meanFiltering * 100, meanSmoothing * 100, meanINPV * 100))
+                plt.xlabel('likelihood')
         else:
-            plt.title(estimationClass + ' likelihood CDF; avg(F,S) = (%02.0f%%,%02.0f%%)' % (meanFiltering * 100, meanSmoothing * 100))
-            plt.xlabel('likelihood')
+            if estimationClass == 'pitch':
+                plt.title(estimationClass + ' std avg(F,S) = (%02.0f,%02.0f) Hz' % (meanFiltering, meanSmoothing))
+                plt.xlabel('Hz')
+            else:
+                plt.title(estimationClass + ' avg(F,S) = (%02.0f%%,%02.0f%%)' % (meanFiltering * 100, meanSmoothing * 100))
+                plt.xlabel('likelihood')
 
         plt.subplot(2, len(classCategories), plotIdx + 1 + len(classCategories))
         n_bins = 20
         # n, bins, patches = plt.hist(collectedFirstWordSentenceResults[estimationClass]['rawFrameMahalanobis'], n_bins, density=True, histtype='step', cumulative=True, label='Raw')
         n, bins, patches = plt.hist(collectedFirstWordSentenceResults[estimationClass]['filtering'], n_bins, density=True, histtype='step', cumulative=False, label='Filtering')
         n, bins, patches = plt.hist(collectedFirstWordSentenceResults[estimationClass]['smoothing'], n_bins, density=True, histtype='step', cumulative=False, label='Smoothing')
+        if sentencesEstimationResults_NN is not None:
+            n, bins, patches = plt.hist(collectedFirstWordSentenceResults[estimationClass]['INPV'], n_bins, density=True, histtype='step', cumulative=False, label='INPV')
         # meanRaw = collectedFirstWordSentenceResults[estimationClass]['rawFrameMahalanobis'].mean()
         meanFiltering = collectedFirstWordSentenceResults[estimationClass]['filtering'].mean()
         meanSmoothing = collectedFirstWordSentenceResults[estimationClass]['smoothing'].mean()
+        if sentencesEstimationResults_NN is not None:
+            meanINPV = collectedFirstWordSentenceResults[estimationClass]['INPV'].mean()
         plt.grid(True)
         plt.legend(loc='right')
         # plt.title(estimationClass + ' likelihood CDF; avg(R,F,S) = (%02.0f%%,%02.0f%%,%02.0f%%)' % (meanRaw * 100, meanFiltering * 100, meanSmoothing * 100))
-        if estimationClass == 'pitch':
-            plt.title(estimationClass + ' std histogram; avg(F,S) = (%02.0f,%02.0f) Hz' % (meanFiltering, meanSmoothing))
-            plt.xlabel('Hz')
+        if sentencesEstimationResults_NN is not None:
+            if estimationClass == 'pitch':
+                #plt.title(estimationClass + ' std histogram; avg(F,S) = (%02.0f,%02.0f,%02.0f) Hz' % (meanFiltering, meanSmoothing, meanINPV))
+                plt.xlabel('Hz')
+            else:
+                #plt.title(estimationClass + ' likelihood histogram; avg(F,S) = (%02.0f%%,%02.0f%%,%02.0f%%)' % (meanFiltering * 100, meanSmoothing * 100, meanINPV * 100))
+                plt.xlabel('likelihood')
         else:
-            plt.title(estimationClass + ' likelihood histogram; avg(F,S) = (%02.0f%%,%02.0f%%)' % (meanFiltering * 100, meanSmoothing * 100))
-            plt.xlabel('likelihood')
+            if estimationClass == 'pitch':
+                #plt.title(estimationClass + ' std histogram; avg(F,S) = (%02.0f,%02.0f) Hz' % (meanFiltering, meanSmoothing))
+                plt.xlabel('Hz')
+            else:
+                #plt.title(estimationClass + ' likelihood histogram; avg(F,S) = (%02.0f%%,%02.0f%%)' % (meanFiltering * 100, meanSmoothing * 100))
+                plt.xlabel('likelihood')
     plt.savefig(path2fig)
     print('fig saved')
     plt.show()
@@ -1378,10 +1423,10 @@ def loss_function(mu, logvar, genderProbs, speakerProbs, wordProbs, pitchMean, p
 
     return KLD + totalNLL_max
 
-def sampleLikelyMember(genderProbs, speakerProbs, wordProbs, pitchMean, pitchLogVar, nDecoders):
+def getProbabilitiesLUT(genderProbs, speakerProbs, wordProbs, pitchMean, pitchLogVar, nDecoders):
     batchSize = int(genderProbs.shape[0]/nDecoders)
     n_clusters = 3
-    mostLikelyValues = np.zeros((batchSize, 4))
+    probabilitiesLUT = list()
     # the nDecoders samples for input no. i to the encoder is at genderProbs[:, i, :] :
     genderProbs, speakerProbs, wordProbs, pitchMean, pitchLogVar = genderProbs.reshape(nDecoders, batchSize, -1), speakerProbs.reshape(nDecoders, batchSize, -1), wordProbs.reshape(nDecoders, batchSize, -1), pitchMean.reshape(nDecoders, batchSize, -1), pitchLogVar.reshape(nDecoders, batchSize, -1)
     for batchIdx in range(batchSize):
@@ -1389,12 +1434,17 @@ def sampleLikelyMember(genderProbs, speakerProbs, wordProbs, pitchMean, pitchLog
         sampledGender, sampledSpeaker, sampledWord, sampledPitch = np.zeros((nDecoders, 1)), np.zeros((nDecoders, 1)), np.zeros((nDecoders, 1)), np.zeros((nDecoders, 1))
         for decoderIdx in range(nDecoders):
             sampledGender[decoderIdx], sampledSpeaker[decoderIdx], sampledWord[decoderIdx], sampledPitch[decoderIdx] = int(np.argwhere(np.random.multinomial(1, pvals=singleInputGenderProb[decoderIdx]))), int(np.argwhere(np.random.multinomial(1, pvals=singleInputSpeakerProb[decoderIdx]))), int(np.argwhere(np.random.multinomial(1, pvals=singleInputWordProb[decoderIdx]))), np.random.normal(loc=singleInputPitchMean[decoderIdx], scale=singleInputPitchStd[decoderIdx])
-        kmeans = KMeans(n_clusters=n_clusters).fit(np.concatenate((sampledGender, sampledSpeaker, sampledWord, sampledPitch), axis=1))
+        X = np.concatenate((sampledGender, sampledSpeaker, sampledWord, sampledPitch), axis=1)
+        # normalize X:
+        scaler = StandardScaler()
+        X_scaled = scaler.fit_transform(X)
+        # cluster X with KMeans:
+        kmeans = KMeans(n_clusters=n_clusters).fit(X_scaled)
         clustersWeights = [(kmeans.labels_ == clusterIdx).sum()/nDecoders for clusterIdx in range(n_clusters)]
-        mostLikelyCluster = np.argmax(clustersWeights)
-        mostLikelyValues[batchIdx] = kmeans.cluster_centers_[mostLikelyCluster]
-    likelyGender, likelySpeaker, likelyWord, likelyPitch = mostLikelyValues[:, 0], mostLikelyValues[:, 1], mostLikelyValues[:, 2], mostLikelyValues[:, 3]
-    return likelyGender, likelySpeaker, likelyWord, likelyPitch
+        closest, _ = pairwise_distances_argmin_min(kmeans.cluster_centers_, X_scaled)
+        clustersRepresentatives = X[closest]
+        probabilitiesLUT.append([clustersWeights, clustersRepresentatives])
+    return probabilitiesLUT
 
 def trainFunc(sentencesAudioInputMatrix, sentencesEstimationResults_sampled, sentencesEstimationPitchResults_sampled, model, optimizer, validateOnly=False):
     if validateOnly:
@@ -1411,7 +1461,7 @@ def trainFunc(sentencesAudioInputMatrix, sentencesEstimationResults_sampled, sen
 
     inputSentenceIndexes = torch.randperm(nSentences)
     sentencesAudioInputMatrix, sentencesEstimationResults_sampled, sentencesEstimationPitchResults_sampled = sentencesAudioInputMatrix[inputSentenceIndexes], sentencesEstimationResults_sampled[inputSentenceIndexes], sentencesEstimationPitchResults_sampled[inputSentenceIndexes]
-    if validateOnly: likelyGender, likelySpeaker, likelyWord, likelyPitch = np.zeros(nSentences), np.zeros(nSentences), np.zeros(nSentences), np.zeros(nSentences)
+    probabilitiesLUT = list()
     for batchIdx in range(nBatches):
         if batchIdx % 10 == 0: print('starting batch %d out of %d' % (batchIdx, nBatches))
         data = sentencesAudioInputMatrix[batchIdx * batchSize:(batchIdx + 1) * batchSize].transpose(1,0).unsqueeze_(2).float()
@@ -1427,8 +1477,7 @@ def trainFunc(sentencesAudioInputMatrix, sentencesEstimationResults_sampled, sen
         total_loss += loss.item() / batchSize
         if not validateOnly: optimizer.step()
 
-        if validateOnly: likelyGender[batchIdx * batchSize:(batchIdx + 1) * batchSize], likelySpeaker[batchIdx * batchSize:(batchIdx + 1) * batchSize], likelyWord[batchIdx * batchSize:(batchIdx + 1) * batchSize], likelyPitch[batchIdx * batchSize:(batchIdx + 1) * batchSize] = sampleLikelyMember(F.softmax(genderProbs, dim=1).cpu().detach().numpy(), F.softmax(speakerProbs, dim=1).cpu().detach().numpy(), F.softmax(wordProbs, dim=1).cpu().detach().numpy(), F.softmax(pitchMean, dim=1).cpu().detach().numpy(), F.softmax(pitchLogVar, dim=1).cpu().detach().numpy(), nDecoders)
-    if validateOnly: likelyList = [likelyGender, likelySpeaker, likelyWord, likelyPitch]
-    else: likelyList = []
-    return total_loss / nBatches, likelyList
+        if validateOnly: probabilitiesLUT += getProbabilitiesLUT(F.softmax(genderProbs, dim=1).cpu().detach().numpy(), F.softmax(speakerProbs, dim=1).cpu().detach().numpy(), F.softmax(wordProbs, dim=1).cpu().detach().numpy(), F.softmax(pitchMean, dim=1).cpu().detach().numpy(), F.softmax(pitchLogVar, dim=1).cpu().detach().numpy(), nDecoders)
+
+    return total_loss / nBatches, probabilitiesLUT
 
