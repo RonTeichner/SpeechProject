@@ -1327,7 +1327,7 @@ class VAE(nn.Module):
         super(VAE, self).__init__()
 
         self.nDrawsFromSingleEncoderOutput = nDrawsFromSingleEncoderOutput
-
+        self.measDim = measDim
         self.zDim = zDim
         self.decoderInnerWidth = 5
         self.genderMultivariate = 2
@@ -1421,7 +1421,7 @@ def loss_function(mu, logvar, genderProbs, speakerProbs, wordProbs, pitchMean, p
 
     KLD = -0.5 * torch.sum(1 + logvar - mu.pow(2) - logvar.exp())
 
-    return KLD + totalNLL_max
+    return totalNLL_max# + KLD
 
 def getProbabilitiesLUT(genderProbs, speakerProbs, wordProbs, pitchMean, pitchLogVar, nDecoders):
     batchSize = int(genderProbs.shape[0]/nDecoders)
@@ -1446,7 +1446,7 @@ def getProbabilitiesLUT(genderProbs, speakerProbs, wordProbs, pitchMean, pitchLo
         probabilitiesLUT.append([clustersWeights, clustersRepresentatives])
     return probabilitiesLUT
 
-def trainFunc(sentencesAudioInputMatrix, sentencesEstimationResults_sampled, sentencesEstimationPitchResults_sampled, model, optimizer, validateOnly=False):
+def trainFunc(sentencesAudioInputMatrix, sentencesEstimationResults_sampled, sentencesEstimationPitchResults_sampled, model, optimizer, epoch, validateOnly=False):
     if validateOnly:
         model.eval()
     else:
@@ -1463,8 +1463,12 @@ def trainFunc(sentencesAudioInputMatrix, sentencesEstimationResults_sampled, sen
     sentencesAudioInputMatrix, sentencesEstimationResults_sampled, sentencesEstimationPitchResults_sampled = sentencesAudioInputMatrix[inputSentenceIndexes], sentencesEstimationResults_sampled[inputSentenceIndexes], sentencesEstimationPitchResults_sampled[inputSentenceIndexes]
     probabilitiesLUT = list()
     for batchIdx in range(nBatches):
-        if batchIdx % 10 == 0: print('starting batch %d out of %d' % (batchIdx, nBatches))
-        data = sentencesAudioInputMatrix[batchIdx * batchSize:(batchIdx + 1) * batchSize].transpose(1,0).unsqueeze_(2).float()
+        if batchIdx % 10 == 0: print('epoch %d: starting batch %d out of %d' % (epoch, batchIdx, nBatches))
+        data = sentencesAudioInputMatrix[batchIdx * batchSize:(batchIdx + 1) * batchSize]
+        # crop beginning to have integer size of model.measDim and then reshape to have model.measDim features:
+        nSamples2Crop = data.shape[1] - int(data.shape[1] / model.measDim) * model.measDim
+        data = (data[:, nSamples2Crop:]).reshape(data.shape[0], -1, model.measDim).transpose(1, 0).float()
+
         labels, pitchLabels = sentencesEstimationResults_sampled[batchIdx * batchSize:(batchIdx + 1) * batchSize].long(), sentencesEstimationPitchResults_sampled[batchIdx * batchSize:(batchIdx + 1) * batchSize].float()
         sampledGender, sampledSpeaker, sampledWord, sampledPitch = labels[:, 0], labels[:, 1], labels[:, 2], pitchLabels[:, 0]
 

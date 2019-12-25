@@ -72,7 +72,11 @@ sentencesEstimationResultsTrain_sampled = sampleFromSmoothing(sentencesEstimatio
 # prepare the encoder input as a matrix by zero-padding the audio samples to have equal lengths:
 sentencesAudioInputMatrixTrain = generateAudioMatrix(sentencesDatasetsAudioTrain)
 
-model = VAE(measDim=1, lstmHiddenSize=12, lstmNumLayers=1, nDrawsFromSingleEncoderOutput=100, zDim=10).cuda()
+fs = 48000 # Hz
+processingDuration = 25e-3 # sec
+nSamplesInSingleLSTM_input = int(processingDuration*fs)
+
+model = VAE(measDim=nSamplesInSingleLSTM_input, lstmHiddenSize=12, lstmNumLayers=1, nDrawsFromSingleEncoderOutput=100, zDim=10).cuda()
 optimizer = optim.Adam(model.parameters(), lr=1e-4)
 
 nSentencesForTrain = sentencesEstimationResultsTrain_sampled.shape[0]  # 1000
@@ -88,13 +92,22 @@ sentencesEstimationPitchResultsValidate_sampled = torch.tensor(sentencesEstimati
 sentencesEstimationResultsValidate_sampled = torch.tensor(sentencesEstimationResultsValidate_sampled[:, :3], dtype=torch.uint8).cuda()
 
 
-nEpochs = 100
+nEpochs = 10000
 for epochIdx in range(nEpochs):
-    trainLoss, _ = trainFunc(sentencesAudioInputMatrixTrain, sentencesEstimationResultsTrain_sampled, sentencesEstimationPitchResultsTrain_sampled, model, optimizer)
-    if epochIdx % 10 == 0:
-        validateLoss, probabilitiesLUT = trainFunc(sentencesAudioInputMatrixValidate, sentencesEstimationResultsValidate_sampled, sentencesEstimationPitchResultsValidate_sampled, model, optimizer, validateOnly=True)
+    trainLoss, _ = trainFunc(sentencesAudioInputMatrixTrain, sentencesEstimationResultsTrain_sampled, sentencesEstimationPitchResultsTrain_sampled, model, optimizer, epochIdx, validateOnly=False)
+    if epochIdx % 100 == 0:
+        validateLoss, probabilitiesLUT = trainFunc(sentencesAudioInputMatrixValidate, sentencesEstimationResultsValidate_sampled, sentencesEstimationPitchResultsValidate_sampled, model, optimizer, epochIdx, validateOnly=True)
         print(f'train loss: {trainLoss}; validation loss: {validateLoss}')
         plotSentenceResults(sentencesEstimationResultsValidate, maleIdx, femaleIdx, path2FigValidate.split('.png')[0] + '_epoch_%d' % epochIdx + '.png', sentencesEstimationResults_NN=probabilitiesLUT)
+
+# Discussion:
+'''
+In 25msec @ fs = 48Khz there are 1200 samples
+In 10msec @ fs = 48Khz there are 480 samples
+So we want to insert the LSTM 1200 samples at each call and then jump 480 samples forward
+But actually, we can trust the LSTM to deal with working with non-overlap samples.
+Therefore we just want to reshape the data to have 1200 features instead of 1.
+'''
 
 
 
