@@ -1433,7 +1433,13 @@ def getProbabilitiesLUT(genderProbs, speakerProbs, wordProbs, pitchMean, pitchLo
         singleInputGenderProb, singleInputSpeakerProb, singleInputWordProb, singleInputPitchMean, singleInputPitchStd = genderProbs[:, batchIdx, :], speakerProbs[:, batchIdx, :], wordProbs[:, batchIdx, :], pitchMean[:, batchIdx, :], np.exp(np.multiply(pitchLogVar[:, batchIdx, :], 0.5))
         sampledGender, sampledSpeaker, sampledWord, sampledPitch = np.zeros((nDecoders, 1)), np.zeros((nDecoders, 1)), np.zeros((nDecoders, 1)), np.zeros((nDecoders, 1))
         for decoderIdx in range(nDecoders):
-            sampledGender[decoderIdx], sampledSpeaker[decoderIdx], sampledWord[decoderIdx], sampledPitch[decoderIdx] = int(np.argwhere(np.random.multinomial(1, pvals=singleInputGenderProb[decoderIdx]))), int(np.argwhere(np.random.multinomial(1, pvals=singleInputSpeakerProb[decoderIdx]))), int(np.argwhere(np.random.multinomial(1, pvals=singleInputWordProb[decoderIdx]))), np.random.normal(loc=singleInputPitchMean[decoderIdx], scale=singleInputPitchStd[decoderIdx])
+            pvals = singleInputGenderProb[decoderIdx] / singleInputGenderProb[decoderIdx].sum()
+            sampledGender[decoderIdx] = int(np.argwhere(np.random.multinomial(1, pvals=pvals)))
+            pvals = singleInputSpeakerProb[decoderIdx] / singleInputSpeakerProb[decoderIdx].sum()
+            sampledSpeaker[decoderIdx] = int(np.argwhere(np.random.multinomial(1, pvals=pvals)))
+            pvals = singleInputWordProb[decoderIdx] / singleInputWordProb[decoderIdx].sum()
+            sampledWord[decoderIdx] = int(np.argwhere(np.random.multinomial(1, pvals=pvals)))
+            sampledPitch[decoderIdx] = np.random.normal(loc=singleInputPitchMean[decoderIdx], scale=singleInputPitchStd[decoderIdx])
         X = np.concatenate((sampledGender, sampledSpeaker, sampledWord, sampledPitch), axis=1)
         if X.shape[0] == 1: # single decoder
             clustersWeights = np.ones(1)
@@ -1485,7 +1491,7 @@ def trainFunc(sentencesAudioInputMatrix, sentencesEstimationResults_sampled, sen
         total_loss += loss.item() / batchSize
         if not validateOnly: optimizer.step()
 
-        if validateOnly: probabilitiesLUT += getProbabilitiesLUT(F.softmax(genderProbs, dim=1).cpu().detach().numpy(), F.softmax(speakerProbs, dim=1).cpu().detach().numpy(), F.softmax(wordProbs, dim=1).cpu().detach().numpy(), F.softmax(pitchMean, dim=1).cpu().detach().numpy(), F.softmax(pitchLogVar, dim=1).cpu().detach().numpy(), nDecoders)
+        if validateOnly: probabilitiesLUT += getProbabilitiesLUT(F.softmax(genderProbs, dim=1).cpu().detach().numpy(), F.softmax(speakerProbs, dim=1).cpu().detach().numpy(), F.softmax(wordProbs, dim=1).cpu().detach().numpy(), pitchMean.cpu().detach().numpy(), pitchLogVar.cpu().detach().numpy(), nDecoders)
 
     return total_loss / nBatches, probabilitiesLUT
 
