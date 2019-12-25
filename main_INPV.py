@@ -76,8 +76,9 @@ fs = 48000 # Hz
 processingDuration = 25e-3 # sec
 nSamplesInSingleLSTM_input = int(processingDuration*fs)
 
-model = VAE(measDim=nSamplesInSingleLSTM_input, lstmHiddenSize=12, lstmNumLayers=1, nDrawsFromSingleEncoderOutput=100, zDim=10).cuda()
-optimizer = optim.Adam(model.parameters(), lr=1e-4)
+#model = VAE(measDim=nSamplesInSingleLSTM_input, lstmHiddenSize=12, lstmNumLayers=1, nDrawsFromSingleEncoderOutput=100, zDim=10).cuda()
+model = VAE(measDim=nSamplesInSingleLSTM_input, lstmHiddenSize=40, lstmNumLayers=1, nDrawsFromSingleEncoderOutput=1, zDim=10).cuda()
+optimizer = optim.Adam(model.parameters(), lr=1e-3)
 
 nSentencesForTrain = sentencesEstimationResultsTrain_sampled.shape[0]  # 1000
 
@@ -93,11 +94,19 @@ sentencesEstimationResultsValidate_sampled = torch.tensor(sentencesEstimationRes
 
 
 nEpochs = 10000
+trainLoss = np.zeros(nEpochs)
 for epochIdx in range(nEpochs):
-    trainLoss, _ = trainFunc(sentencesAudioInputMatrixTrain, sentencesEstimationResultsTrain_sampled, sentencesEstimationPitchResultsTrain_sampled, model, optimizer, epochIdx, validateOnly=False)
+    trainLoss[epochIdx], _ = trainFunc(sentencesAudioInputMatrixTrain, sentencesEstimationResultsTrain_sampled, sentencesEstimationPitchResultsTrain_sampled, model, optimizer, epochIdx, validateOnly=False)
     if epochIdx % 100 == 0:
-        validateLoss, probabilitiesLUT = trainFunc(sentencesAudioInputMatrixValidate, sentencesEstimationResultsValidate_sampled, sentencesEstimationPitchResultsValidate_sampled, model, optimizer, epochIdx, validateOnly=True)
-        print(f'train loss: {trainLoss}; validation loss: {validateLoss}')
+        #validateLoss, probabilitiesLUT = trainFunc(sentencesAudioInputMatrixValidate, sentencesEstimationResultsValidate_sampled, sentencesEstimationPitchResultsValidate_sampled, model, optimizer, epochIdx, validateOnly=True)
+        validateLoss, probabilitiesLUT = trainFunc(sentencesAudioInputMatrixTrain[:1000], sentencesEstimationResultsTrain_sampled[:1000], sentencesEstimationPitchResultsTrain_sampled[:1000], model, optimizer, epochIdx, validateOnly=True)
+        # print(f'train losses: {trainLoss[:epochIdx+1]}')
+        fig = plt.subplots(figsize=(24, 10))
+        plt.plot(trainLoss[:epochIdx + 1])
+        plt.xlabel('epochs')
+        plt.savefig('./trainLoss.png')
+        plt.show()
+        print(f'train loss: {trainLoss[epochIdx]}; validation loss: {validateLoss}')
         plotSentenceResults(sentencesEstimationResultsValidate, maleIdx, femaleIdx, path2FigValidate.split('.png')[0] + '_epoch_%d' % epochIdx + '.png', sentencesEstimationResults_NN=probabilitiesLUT)
 
 # Discussion:

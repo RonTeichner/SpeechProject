@@ -1416,8 +1416,8 @@ def loss_function(mu, logvar, genderProbs, speakerProbs, wordProbs, pitchMean, p
     print('loss function - pitch for duration: ', time.time() - t, ' sec')
     '''
 
-    totalNLL_max = (genderNLL+speakerNLL+wordNLL+pitchNLL).reshape(-1, batchSize).max(dim=0)[0].sum()  # each column has the nDecoders different outputs from the same encoder's output, then max is performed
-    # torch.exp(torch.mul(pitchLogVar, 0.5))
+    #totalNLL_max = (genderNLL+speakerNLL+wordNLL+pitchNLL).reshape(-1, batchSize).max(dim=0)[0].sum()  # each column has the nDecoders different outputs from the same encoder's output, then max is performed
+    totalNLL_max = (speakerNLL).reshape(-1, batchSize).max(dim=0)[0].sum()
 
     KLD = -0.5 * torch.sum(1 + logvar - mu.pow(2) - logvar.exp())
 
@@ -1435,14 +1435,18 @@ def getProbabilitiesLUT(genderProbs, speakerProbs, wordProbs, pitchMean, pitchLo
         for decoderIdx in range(nDecoders):
             sampledGender[decoderIdx], sampledSpeaker[decoderIdx], sampledWord[decoderIdx], sampledPitch[decoderIdx] = int(np.argwhere(np.random.multinomial(1, pvals=singleInputGenderProb[decoderIdx]))), int(np.argwhere(np.random.multinomial(1, pvals=singleInputSpeakerProb[decoderIdx]))), int(np.argwhere(np.random.multinomial(1, pvals=singleInputWordProb[decoderIdx]))), np.random.normal(loc=singleInputPitchMean[decoderIdx], scale=singleInputPitchStd[decoderIdx])
         X = np.concatenate((sampledGender, sampledSpeaker, sampledWord, sampledPitch), axis=1)
-        # normalize X:
-        scaler = StandardScaler()
-        X_scaled = scaler.fit_transform(X)
-        # cluster X with KMeans:
-        kmeans = KMeans(n_clusters=n_clusters).fit(X_scaled)
-        clustersWeights = [(kmeans.labels_ == clusterIdx).sum()/nDecoders for clusterIdx in range(n_clusters)]
-        closest, _ = pairwise_distances_argmin_min(kmeans.cluster_centers_, X_scaled)
-        clustersRepresentatives = X[closest]
+        if X.shape[0] == 1: # single decoder
+            clustersWeights = np.ones(1)
+            clustersRepresentatives = X
+        else:
+            # normalize X:
+            scaler = StandardScaler()
+            X_scaled = scaler.fit_transform(X)
+            # cluster X with KMeans:
+            kmeans = KMeans(n_clusters=n_clusters).fit(X_scaled)
+            clustersWeights = [(kmeans.labels_ == clusterIdx).sum()/nDecoders for clusterIdx in range(n_clusters)]
+            closest, _ = pairwise_distances_argmin_min(kmeans.cluster_centers_, X_scaled)
+            clustersRepresentatives = X[closest]
         probabilitiesLUT.append([clustersWeights, clustersRepresentatives])
     return probabilitiesLUT
 
