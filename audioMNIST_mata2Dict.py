@@ -6,6 +6,7 @@ import os
 import numpy as np
 from scipy.io import wavfile
 from scipy.spatial.distance import mahalanobis as calcMahalanobis
+from scipy import signal
 from speakerfeatures import *
 import matplotlib.pyplot as plt
 import random
@@ -1321,7 +1322,7 @@ def sampleFromSmoothing(sentencesEstimationResults, enableSimpleClassification=F
         sentencesEstimationResults_sampled[sentenceIdx] = np.array([sampledGender, sampledSpeaker, sampledWord, sampledPitch])
     return sentencesEstimationResults_sampled
 
-def generateAudioMatrix(sentencesDatasetsAudio):
+def generateAudioMatrix(sentencesDatasetsAudio, nSamplesInSingleLSTM_input, enableSpectrogram):
     maxSentenceLengh = 0
     for sentenceIdx, sentence in enumerate(sentencesDatasetsAudio):
         if len(sentence[1][1]) > maxSentenceLengh: maxSentenceLengh = len(sentence[1][1])
@@ -1330,6 +1331,11 @@ def generateAudioMatrix(sentencesDatasetsAudio):
         wav = sentence[1][1]
         zeroPaddedWav = np.concatenate((np.zeros(maxSentenceLengh - len(wav)), wav))
         sentenceAudioMat[sentenceIdx] = zeroPaddedWav
+    sentenceAudioMat = np.expand_dims(sentenceAudioMat.transpose(), axis=2)  # [time, sentenceIdx, feature]
+    if enableSpectrogram:
+        f, t, Sxx = signal.spectrogram(x=sentenceAudioMat, fs=48000, nperseg=nSamplesInSingleLSTM_input, return_onesided=True, axis=0)
+        # plt.pcolormesh(t, f, Sxx[:,0,:])
+        sentenceAudioMat = Sxx.transpose(3, 1, 0, 2).squeeze(axis=-1)
     return sentenceAudioMat
 
 class VAE(nn.Module):
@@ -1472,7 +1478,7 @@ def getProbabilitiesLUT(genderProbs, speakerProbs, wordProbs, pitchMean, pitchLo
         probabilitiesLUT.append([clustersWeights, clustersRepresentatives])
     return probabilitiesLUT
 
-def trainFunc(sentencesAudioInputMatrix, sentencesEstimationResults_sampled, sentencesEstimationPitchResults_sampled, model, optimizer, epoch, validateOnly=False, enableSimpleClassification=False):
+def trainFunc(sentencesAudioInputMatrix, sentencesEstimationResults_sampled, sentencesEstimationPitchResults_sampled, model, optimizer, epoch, validateOnly=False, enableSpectrogram=False, enableSimpleClassification=False):
     if validateOnly:
         model.eval()
     else:
@@ -1481,19 +1487,20 @@ def trainFunc(sentencesAudioInputMatrix, sentencesEstimationResults_sampled, sen
     total_loss = 0
 
     batchSize = 200
-    nSentences = sentencesAudioInputMatrix.shape[0]
+    nSentences = sentencesAudioInputMatrix.shape[1]
     nBatches = int(nSentences/batchSize)
     nDecoders = model.nDrawsFromSingleEncoderOutput
 
     inputSentenceIndexes = torch.randperm(nSentences)
-    sentencesAudioInputMatrix, sentencesEstimationResults_sampled, sentencesEstimationPitchResults_sampled = sentencesAudioInputMatrix[inputSentenceIndexes], sentencesEstimationResults_sampled[inputSentenceIndexes], sentencesEstimationPitchResults_sampled[inputSentenceIndexes]
+    sentencesAudioInputMatrix, sentencesEstimationResults_sampled, sentencesEstimationPitchResults_sampled = sentencesAudioInputMatrix[:, inputSentenceIndexes], sentencesEstimationResults_sampled[inputSentenceIndexes], sentencesEstimationPitchResults_sampled[inputSentenceIndexes]
     probabilitiesLUT = list()
     for batchIdx in range(nBatches):
         if batchIdx % 10 == 0: print('epoch %d: starting batch %d out of %d' % (epoch, batchIdx, nBatches))
-        data = sentencesAudioInputMatrix[batchIdx * batchSize:(batchIdx + 1) * batchSize]
+        data = sentencesAudioInputMatrix[:, batchIdx * batchSize:(batchIdx + 1) * batchSize].float()
         # crop beginning to have integer size of model.measDim and then reshape to have model.measDim features:
-        nSamples2Crop = data.shape[1] - int(data.shape[1] / model.measDim) * model.measDim
-        data = (data[:, nSamples2Crop:]).reshape(data.shape[0], -1, model.measDim).transpose(1, 0).float()
+        if not enableSpectrogram:
+            nSamples2Crop = data.shape[0] - int(data.shape[0] / model.measDim) * model.measDim
+            data = (data[nSamples2Crop:]).transpose(1, 2).reshape(-1, model.measDim, data.shape[1]).transpose(1, 2)
 
         labels, pitchLabels = sentencesEstimationResults_sampled[batchIdx * batchSize:(batchIdx + 1) * batchSize].long(), sentencesEstimationPitchResults_sampled[batchIdx * batchSize:(batchIdx + 1) * batchSize].float()
         sampledGender, sampledSpeaker, sampledWord, sampledPitch = labels[:, 0], labels[:, 1], labels[:, 2], pitchLabels[:, 0]
