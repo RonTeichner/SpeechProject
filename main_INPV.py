@@ -114,11 +114,19 @@ for epochIdx in range(nEpochs):
         plt.show()
         print(f'train loss: {trainLoss[epochIdx]}')
         #try:
-        #validateLoss, probabilitiesLUT = trainFunc(sentencesAudioInputMatrixValidate, sentencesEstimationResultsValidate_sampled, sentencesEstimationPitchResultsValidate_sampled, model, optimizer, epochIdx, validateOnly=True)
+
+        #validateLoss, probabilitiesLUT = trainFunc(sentencesAudioInputMatrixValidate, sentencesEstimationResultsValidate_sampled, sentencesEstimationPitchResultsValidate_sampled, model, optimizer, epochIdx, validateOnly=True, enableSpectrogram=enableSpectrogram, enableSimpleClassification=enableSimpleClassification)
+        #plotSentenceResults(sentencesEstimationResultsValidate, maleIdx, femaleIdx, path2FigValidate.split('.png')[0] + '_epoch_%d' % epochIdx + '.png', sentencesEstimationResults_NN=probabilitiesLUT)
+
         validateLoss, probabilitiesLUT = trainFunc(sentencesAudioInputMatrixTrain[:, :1000], sentencesEstimationResultsTrain_sampled[:1000], sentencesEstimationPitchResultsTrain_sampled[:1000], model, optimizer, epochIdx, validateOnly=True, enableSpectrogram=enableSpectrogram, enableSimpleClassification=enableSimpleClassification)
+        if enableSimpleClassification:
+            wordVecLUT, wordVecResults = wordVecFromProbabilitiesLUT(probabilitiesLUT), sentencesEstimationResultsTrain_sampled[:1000, -1].cpu().numpy()  # wordVecFromResults(sentencesEstimationResultsTrain[:1000])
+            print('%% correct in epoch %d' % ((wordVecLUT.round() == wordVecResults.round()).sum()/len(wordVecLUT) * 100))
+        plotSentenceResults(sentencesEstimationResultsTrain[:1000], maleIdx, femaleIdx, path2FigValidate.split('.png')[0] + '_epoch_%d' % epochIdx + '.png', sentencesEstimationResults_NN=probabilitiesLUT)
+
         print(f'train loss: {trainLoss[epochIdx]}; validation loss: {validateLoss}')
         # print(f'train losses: {trainLoss[:epochIdx+1]}')
-        plotSentenceResults(sentencesEstimationResultsValidate, maleIdx, femaleIdx, path2FigValidate.split('.png')[0] + '_epoch_%d' % epochIdx + '.png', sentencesEstimationResults_NN=probabilitiesLUT)
+
         #except:
         #    x=0
 

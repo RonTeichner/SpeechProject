@@ -1408,7 +1408,8 @@ def loss_function_classification_prob(wordProbs, sampledWord):
     batchSize = sampledWord.numel()
     sampledWord = sampledWord.unsqueeze(1).repeat(nDecoders, 1).reshape(-1)
     wordNLL = F.cross_entropy(wordProbs, sampledWord, reduction='none')
-    return wordNLL.reshape(-1, batchSize).sum()
+    nCorrectPredictions = (F.softmax(wordProbs, dim=1).argmax(dim=1) == sampledWord).sum()
+    return wordNLL.reshape(-1, batchSize).sum(), nCorrectPredictions
 
 def loss_function(mu, logvar, genderProbs, speakerProbs, wordProbs, pitchMean, pitchLogVar, sampledGender, sampledSpeaker, sampledWord, sampledPitch, nDecoders):
     batchSize = sampledWord.numel()
@@ -1455,13 +1456,13 @@ def getProbabilitiesLUT(genderProbs, speakerProbs, wordProbs, pitchMean, pitchLo
         singleInputGenderProb, singleInputSpeakerProb, singleInputWordProb, singleInputPitchMean, singleInputPitchStd = genderProbs[:, batchIdx, :], speakerProbs[:, batchIdx, :], wordProbs[:, batchIdx, :], pitchMean[:, batchIdx, :], np.exp(np.multiply(pitchLogVar[:, batchIdx, :], 0.5))
         sampledGender, sampledSpeaker, sampledWord, sampledPitch = np.zeros((nDecoders, 1)), np.zeros((nDecoders, 1)), np.zeros((nDecoders, 1)), np.zeros((nDecoders, 1))
         for decoderIdx in range(nDecoders):
-            pvals = singleInputGenderProb[decoderIdx] / singleInputGenderProb[decoderIdx].sum()
-            sampledGender[decoderIdx] = int(np.argwhere(np.random.multinomial(1, pvals=pvals)))
-            pvals = singleInputSpeakerProb[decoderIdx] / singleInputSpeakerProb[decoderIdx].sum()
-            sampledSpeaker[decoderIdx] = int(np.argwhere(np.random.multinomial(1, pvals=pvals)))
-            pvals = singleInputWordProb[decoderIdx] / singleInputWordProb[decoderIdx].sum()
-            sampledWord[decoderIdx] = int(np.argwhere(np.random.multinomial(1, pvals=pvals)))
-            sampledPitch[decoderIdx] = np.random.normal(loc=singleInputPitchMean[decoderIdx], scale=singleInputPitchStd[decoderIdx])
+            pvals = singleInputGenderProb[decoderIdx]# / singleInputGenderProb[decoderIdx].sum()
+            sampledGender[decoderIdx] = int(np.argwhere(torch.distributions.multinomial.Multinomial(1, probs=pvals).sample().numpy()))
+            pvals = singleInputSpeakerProb[decoderIdx]# / singleInputSpeakerProb[decoderIdx].sum()
+            sampledSpeaker[decoderIdx] = int(np.argwhere(torch.distributions.multinomial.Multinomial(1, probs=pvals).sample().numpy()))
+            pvals = singleInputWordProb[decoderIdx]# / singleInputWordProb[decoderIdx].sum()
+            sampledWord[decoderIdx] = int(np.argwhere(torch.distributions.multinomial.Multinomial(1, probs=pvals).sample().numpy()))
+            sampledPitch[decoderIdx] = torch.distributions.normal.Normal(loc=singleInputPitchMean[decoderIdx], scale=singleInputPitchStd[decoderIdx]).sample().numpy()
         X = np.concatenate((sampledGender, sampledSpeaker, sampledWord, sampledPitch), axis=1)
         if X.shape[0] == 1: # single decoder
             clustersWeights = np.ones(1)
@@ -1493,7 +1494,8 @@ def trainFunc(sentencesAudioInputMatrix, sentencesEstimationResults_sampled, sen
 
     inputSentenceIndexes = torch.randperm(nSentences)
     sentencesAudioInputMatrix, sentencesEstimationResults_sampled, sentencesEstimationPitchResults_sampled = sentencesAudioInputMatrix[:, inputSentenceIndexes], sentencesEstimationResults_sampled[inputSentenceIndexes], sentencesEstimationPitchResults_sampled[inputSentenceIndexes]
-    probabilitiesLUT = list()
+    if validateOnly: probabilitiesLUT = list()
+    if enableSimpleClassification: nCorrectPredictions = 0.0
     for batchIdx in range(nBatches):
         if batchIdx % 10 == 0: print('epoch %d: starting batch %d out of %d' % (epoch, batchIdx, nBatches))
         data = sentencesAudioInputMatrix[:, batchIdx * batchSize:(batchIdx + 1) * batchSize].float()
@@ -1510,7 +1512,8 @@ def trainFunc(sentencesAudioInputMatrix, sentencesEstimationResults_sampled, sen
         # t = time.time()
 
         if enableSimpleClassification:
-            loss = loss_function_classification_prob(z, sampledWord)
+            loss, nCorrectPredictionsSingleBatch = loss_function_classification_prob(z, sampledWord)
+            nCorrectPredictions += nCorrectPredictionsSingleBatch.float()/batchSize
         else:
             loss = loss_function(mu, logvar, genderProbs, speakerProbs, wordProbs, pitchMean, pitchLogVar, sampledGender, sampledSpeaker, sampledWord, sampledPitch, model.nDrawsFromSingleEncoderOutput)
 
@@ -1519,7 +1522,37 @@ def trainFunc(sentencesAudioInputMatrix, sentencesEstimationResults_sampled, sen
         total_loss += loss.item() / batchSize
         if not validateOnly: optimizer.step()
 
-        if validateOnly: probabilitiesLUT += getProbabilitiesLUT(F.softmax(genderProbs, dim=1).cpu().detach().numpy(), F.softmax(speakerProbs, dim=1).cpu().detach().numpy(), F.softmax(wordProbs, dim=1).cpu().detach().numpy(), pitchMean.cpu().detach().numpy(), pitchLogVar.cpu().detach().numpy(), nDecoders)
+        if validateOnly:
+            if enableSimpleClassification:
+                singleBatchProbabilitiesLUT = getProbabilitiesLUT(F.softmax(torch.div(torch.ones_like(genderProbs), genderProbs.shape[1]), dim=1).cpu().detach(), F.softmax(torch.div(torch.ones_like(speakerProbs), speakerProbs.shape[1]), dim=1).cpu().detach(), F.softmax(z, dim=1).cpu().detach(), pitchMean.cpu().detach(), pitchLogVar.cpu().detach(), nDecoders)
+                probabilitiesLUT += singleBatchProbabilitiesLUT
+                wordVecLUT, wordVecResults = wordVecFromProbabilitiesLUT(singleBatchProbabilitiesLUT), sampledWord.cpu().numpy()  # wordVecFromResults(sentencesEstimationResultsTrain[:1000])
+                print('%% correct in batch %d' % ((wordVecLUT.round() == wordVecResults.round()).sum() / len(wordVecLUT) * 100))
+            else:
+                probabilitiesLUT += getProbabilitiesLUT(F.softmax(genderProbs, dim=1).cpu().detach().numpy(), F.softmax(speakerProbs, dim=1).cpu().detach().numpy(), F.softmax(wordProbs, dim=1).cpu().detach().numpy(), pitchMean.cpu().detach().numpy(), pitchLogVar.cpu().detach().numpy(), nDecoders)
 
-    return total_loss / nBatches, probabilitiesLUT
+    if validateOnly:
+        probabilitiesLUTOut = [None]*nSentences
+        for sentenceIdx in range(nSentences):
+            probabilitiesLUTOut[inputSentenceIndexes[sentenceIdx]] = probabilitiesLUT[sentenceIdx]
+    else:
+        probabilitiesLUTOut = list()
+
+    if enableSimpleClassification:
+        nCorrectPredictions = nCorrectPredictions/nBatches
+        print(f'%% correct predictions {nCorrectPredictions}')
+
+    return total_loss / nBatches, probabilitiesLUTOut
+
+def wordVecFromProbabilitiesLUT(probabilitiesLUT):
+    wordVec = np.zeros(len(probabilitiesLUT))
+    for wordIdx, singleSentenceProbability in enumerate(probabilitiesLUT):
+        wordVec[wordIdx] = int(singleSentenceProbability[1][0][2].round())
+    return wordVec
+
+def wordVecFromResults(sentencesEstimationResultsTrain):
+    wordVec = np.zeros(len(sentencesEstimationResultsTrain))
+    for wordIdx, singleSentenceProbability in enumerate(sentencesEstimationResultsTrain):
+        wordVec[wordIdx] = singleSentenceProbability['groundTruth']['Digits'][0]
+    return wordVec
 
