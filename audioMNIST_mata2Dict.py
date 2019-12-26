@@ -1308,7 +1308,7 @@ def sampleFromSmoothing(sentencesEstimationResults, enableSimpleClassification=F
                 sampledGender = 1
             else:
                 sampledGender = 0
-            sampledSpeaker = int(sentenceResults['SpeakerNo'])
+            sampledSpeaker = int(sentenceResults['SpeakerNo']) - 1
             sampledWord = sentenceResults['Digits'][0]
         else:
             sentenceResults = sentence['results']
@@ -1413,16 +1413,21 @@ def loss_function_classification_prob(wordProbs, sampledWord):
 
 def loss_function(mu, logvar, genderProbs, speakerProbs, wordProbs, pitchMean, pitchLogVar, sampledGender, sampledSpeaker, sampledWord, sampledPitch, nDecoders):
     batchSize = sampledWord.numel()
-    sampledWord, sampledGender, sampledSpeaker, sampledPitch = sampledWord.unsqueeze(1).repeat(nDecoders, 1).reshape(-1), sampledGender.unsqueeze(1).repeat(nDecoders, 1).reshape(-1), sampledSpeaker.unsqueeze(1).repeat(nDecoders, 1).reshape(-1), sampledPitch.unsqueeze(1).repeat(nDecoders, 1).reshape(-1)
 
+    sampledGender = sampledGender.unsqueeze(1).repeat(nDecoders, 1).reshape(-1)
     genderNLL = F.cross_entropy(genderProbs, sampledGender, reduction='none')
+
+    sampledSpeaker = sampledSpeaker.unsqueeze(1).repeat(nDecoders, 1).reshape(-1)
     speakerNLL = F.cross_entropy(speakerProbs, sampledSpeaker, reduction='none')
+
+    sampledWord = sampledWord.unsqueeze(1).repeat(nDecoders, 1).reshape(-1)
     wordNLL = F.cross_entropy(wordProbs, sampledWord, reduction='none')
 
+    sampledPitch = sampledPitch.unsqueeze(1).repeat(nDecoders, 1).reshape(-1)
     pitchMean = torch.squeeze(pitchMean)
     pitchLogVar = torch.squeeze(pitchLogVar)
 
-    pitchNLL = -torch.mul(pitchLogVar, 0.5) - torch.mul(torch.pow(torch.div(sampledPitch - pitchMean, torch.exp(torch.mul(pitchLogVar, 0.5))), 2), 0.5)
+    #pitchNLL = -torch.mul(pitchLogVar, 0.5) - torch.mul(torch.pow(torch.div(sampledPitch - pitchMean, torch.exp(torch.mul(pitchLogVar, 0.5))), 2), 0.5)
     '''
     t = time.time()
     pitchNLL = [torch.distributions.normal.Normal(pitchMean[pitchIdx], pitchLogVar[pitchIdx].mul(0.5).exp_()).log_prob(sampledPitch[pitchIdx]) for pitchIdx in range(pitchMean.shape[0])]
@@ -1440,7 +1445,7 @@ def loss_function(mu, logvar, genderProbs, speakerProbs, wordProbs, pitchMean, p
     '''
 
     #totalNLL_max = (genderNLL+speakerNLL+wordNLL+pitchNLL).reshape(-1, batchSize).max(dim=0)[0].sum()  # each column has the nDecoders different outputs from the same encoder's output, then max is performed
-    totalNLL_max = (wordNLL).reshape(-1, batchSize).max(dim=0)[0].sum()
+    totalNLL_max = (genderNLL+speakerNLL+wordNLL).reshape(-1, batchSize).max(dim=0)[0].sum()
 
     KLD = -0.5 * torch.sum(1 + logvar - mu.pow(2) - logvar.exp())
 
@@ -1529,7 +1534,7 @@ def trainFunc(sentencesAudioInputMatrix, sentencesEstimationResults_sampled, sen
                 wordVecLUT, wordVecResults = wordVecFromProbabilitiesLUT(singleBatchProbabilitiesLUT), sampledWord.cpu().numpy()  # wordVecFromResults(sentencesEstimationResultsTrain[:1000])
                 print('%% correct in batch %d' % ((wordVecLUT.round() == wordVecResults.round()).sum() / len(wordVecLUT) * 100))
             else:
-                probabilitiesLUT += getProbabilitiesLUT(F.softmax(genderProbs, dim=1).cpu().detach().numpy(), F.softmax(speakerProbs, dim=1).cpu().detach().numpy(), F.softmax(wordProbs, dim=1).cpu().detach().numpy(), pitchMean.cpu().detach().numpy(), pitchLogVar.cpu().detach().numpy(), nDecoders)
+                probabilitiesLUT += getProbabilitiesLUT(F.softmax(genderProbs, dim=1).cpu().detach(), F.softmax(speakerProbs, dim=1).cpu().detach(), F.softmax(wordProbs, dim=1).cpu().detach(), 0*pitchMean.cpu().detach(), 0*pitchLogVar.cpu().detach(), nDecoders)
 
     if validateOnly:
         probabilitiesLUTOut = [None]*nSentences

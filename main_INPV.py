@@ -57,8 +57,8 @@ path2SentencesPitchTest = './SentencesPitchTest.pt'
 path2SentencesResultsTest = './SentencesResultsTest.pt'
 path2FigTest = './SentencesFigTest.png'
 
-enableWordOnlyClassificationAtEncoderOutput = True
-enableTrain_wrt_groundTruth = False
+enableWordOnlyClassificationAtEncoderOutput = False
+enableTrain_wrt_groundTruth = True
 enableSpectrogram = True
 
 nGenders = 2
@@ -87,7 +87,7 @@ if enableSpectrogram:
 else:
     nSamplesInSingleLSTM_input = nTimeDomainSamplesInSingleFrame
 
-model = VAE(measDim=nSamplesInSingleLSTM_input, lstmHiddenSize=20, lstmNumLayers=2, nDrawsFromSingleEncoderOutput=1, zDim=10).cuda()
+model = VAE(measDim=nSamplesInSingleLSTM_input, lstmHiddenSize=60, lstmNumLayers=4, nDrawsFromSingleEncoderOutput=10, zDim=60).cuda()
 optimizer = optim.Adam(model.parameters(), lr=1e-3)
 
 nSentencesForTrain = sentencesEstimationResultsTrain_sampled.shape[0]  # 1000
@@ -103,11 +103,11 @@ sentencesEstimationPitchResultsValidate_sampled = torch.tensor(sentencesEstimati
 sentencesEstimationResultsValidate_sampled = torch.tensor(sentencesEstimationResultsValidate_sampled[:, :3], dtype=torch.uint8).cuda()
 
 
-nEpochs = 10000
+nEpochs = 100000
 trainLoss = np.zeros(nEpochs)
 for epochIdx in range(nEpochs):
     trainLoss[epochIdx], _ = trainFunc(sentencesAudioInputMatrixTrain, sentencesEstimationResultsTrain_sampled, sentencesEstimationPitchResultsTrain_sampled, model, optimizer, epochIdx, validateOnly=False, enableSpectrogram=enableSpectrogram, enableSimpleClassification=enableWordOnlyClassificationAtEncoderOutput)
-    if epochIdx % 100 == 0:
+    if epochIdx % 1000 == 0:
         fig = plt.subplots(figsize=(24, 10))
         plt.plot(trainLoss[:epochIdx + 1])
         plt.xlabel('epochs')
