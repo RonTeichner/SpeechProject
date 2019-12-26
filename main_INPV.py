@@ -81,7 +81,7 @@ processingDuration = 25e-3  # sec
 nSamplesInSingleLSTM_input = int(processingDuration*fs)
 
 #model = VAE(measDim=nSamplesIn SingleLSTM_input, lstmHiddenSize=12, lstmNumLayers=1, nDrawsFromSingleEncoderOutput=100, zDim=10).cuda()
-model = VAE(measDim=nSamplesInSingleLSTM_input, lstmHiddenSize=20, lstmNumLayers=1, nDrawsFromSingleEncoderOutput=1, zDim=10).cuda()
+model = VAE(measDim=nSamplesInSingleLSTM_input, lstmHiddenSize=20, lstmNumLayers=2, nDrawsFromSingleEncoderOutput=1, zDim=10).cuda()
 optimizer = optim.Adam(model.parameters(), lr=1e-3)
 
 nSentencesForTrain = sentencesEstimationResultsTrain_sampled.shape[0]  # 1000
