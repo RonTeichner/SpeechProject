@@ -1399,9 +1399,10 @@ def weights_init_uniform_rule(m):
 
 def loss_function_classification_prob(wordProbs, sampledWord):
     nDecoders = 1
+    batchSize = sampledWord.numel()
     sampledWord = sampledWord.unsqueeze(1).repeat(nDecoders, 1).reshape(-1)
     wordNLL = F.cross_entropy(wordProbs, sampledWord, reduction='none')
-    return wordNLL
+    return wordNLL.reshape(-1, batchSize).sum()
 
 def loss_function(mu, logvar, genderProbs, speakerProbs, wordProbs, pitchMean, pitchLogVar, sampledGender, sampledSpeaker, sampledWord, sampledPitch, nDecoders):
     batchSize = sampledWord.numel()
