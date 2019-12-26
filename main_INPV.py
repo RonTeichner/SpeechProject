@@ -58,7 +58,7 @@ path2SentencesResultsTest = './SentencesResultsTest.pt'
 path2FigTest = './SentencesFigTest.png'
 
 enableWordOnlyClassificationAtEncoderOutput = True
-enableTrain_wrt_groundTruth = True
+enableTrain_wrt_groundTruth = False
 enableSpectrogram = True
 
 nGenders = 2
