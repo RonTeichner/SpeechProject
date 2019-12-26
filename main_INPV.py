@@ -17,7 +17,7 @@ import sounddevice as sd
 # Import the package and create an audio effects chain function.
 from pysndfx import AudioEffectsChain
 
-random.seed(0)
+# random.seed(0)
 
 path2metadata = './AudioMNISTMetadata.pt'
 
@@ -57,6 +57,8 @@ path2SentencesPitchTest = './SentencesPitchTest.pt'
 path2SentencesResultsTest = './SentencesResultsTest.pt'
 path2FigTest = './SentencesFigTest.png'
 
+enableSimpleClassification = True
+
 nGenders = 2
 femaleIdx, maleIdx = np.arange(nGenders)
 
@@ -67,17 +69,19 @@ sentencesDatasetsAudioValidate = pickle.load(open(path2SentencesAudioValidate, "
 sentencesEstimationResultsValidate = pickle.load(open(path2SentencesResultsValidate, "rb"))
 
 # sample from results dataset to obtain the 'deterministic' dataset:
-sentencesEstimationResultsTrain_sampled = sampleFromSmoothing(sentencesEstimationResultsTrain)
+sentencesEstimationResultsTrain_sampled = sampleFromSmoothing(sentencesEstimationResultsTrain, enableSimpleClassification)
 
 # prepare the encoder input as a matrix by zero-padding the audio samples to have equal lengths:
 sentencesAudioInputMatrixTrain = generateAudioMatrix(sentencesDatasetsAudioTrain)
 
-fs = 48000 # Hz
-processingDuration = 25e-3 # sec
+
+
+fs = 48000  # Hz
+processingDuration = 25e-3  # sec
 nSamplesInSingleLSTM_input = int(processingDuration*fs)
 
-#model = VAE(measDim=nSamplesInSingleLSTM_input, lstmHiddenSize=12, lstmNumLayers=1, nDrawsFromSingleEncoderOutput=100, zDim=10).cuda()
-model = VAE(measDim=nSamplesInSingleLSTM_input, lstmHiddenSize=40, lstmNumLayers=2, nDrawsFromSingleEncoderOutput=1, zDim=40).cuda()
+#model = VAE(measDim=nSamplesIn SingleLSTM_input, lstmHiddenSize=12, lstmNumLayers=1, nDrawsFromSingleEncoderOutput=100, zDim=10).cuda()
+model = VAE(measDim=nSamplesInSingleLSTM_input, lstmHiddenSize=20, lstmNumLayers=1, nDrawsFromSingleEncoderOutput=1, zDim=10).cuda()
 optimizer = optim.Adam(model.parameters(), lr=1e-3)
 
 nSentencesForTrain = sentencesEstimationResultsTrain_sampled.shape[0]  # 1000
@@ -87,7 +91,7 @@ sentencesEstimationResultsTrain_sampled = torch.tensor(sentencesEstimationResult
 sentencesAudioInputMatrixTrain = torch.tensor(sentencesAudioInputMatrixTrain[:nSentencesForTrain], dtype=torch.int16).cuda()
 
 # variables for validation:
-sentencesEstimationResultsValidate_sampled = sampleFromSmoothing(sentencesEstimationResultsValidate)
+sentencesEstimationResultsValidate_sampled = sampleFromSmoothing(sentencesEstimationResultsValidate, enableSimpleClassification)
 sentencesAudioInputMatrixValidate = torch.tensor(generateAudioMatrix(sentencesDatasetsAudioValidate), dtype=torch.int16).cuda()
 sentencesEstimationPitchResultsValidate_sampled = torch.tensor(sentencesEstimationResultsValidate_sampled[:, 3:4], dtype=torch.float16).cuda()
 sentencesEstimationResultsValidate_sampled = torch.tensor(sentencesEstimationResultsValidate_sampled[:, :3], dtype=torch.uint8).cuda()
@@ -96,18 +100,22 @@ sentencesEstimationResultsValidate_sampled = torch.tensor(sentencesEstimationRes
 nEpochs = 10000
 trainLoss = np.zeros(nEpochs)
 for epochIdx in range(nEpochs):
-    trainLoss[epochIdx], _ = trainFunc(sentencesAudioInputMatrixTrain, sentencesEstimationResultsTrain_sampled, sentencesEstimationPitchResultsTrain_sampled, model, optimizer, epochIdx, validateOnly=False)
+    trainLoss[epochIdx], _ = trainFunc(sentencesAudioInputMatrixTrain, sentencesEstimationResultsTrain_sampled, sentencesEstimationPitchResultsTrain_sampled, model, optimizer, epochIdx, validateOnly=False, enableSimpleClassification=enableSimpleClassification)
     if epochIdx % 100 == 0:
-        #validateLoss, probabilitiesLUT = trainFunc(sentencesAudioInputMatrixValidate, sentencesEstimationResultsValidate_sampled, sentencesEstimationPitchResultsValidate_sampled, model, optimizer, epochIdx, validateOnly=True)
-        validateLoss, probabilitiesLUT = trainFunc(sentencesAudioInputMatrixTrain[:1000], sentencesEstimationResultsTrain_sampled[:1000], sentencesEstimationPitchResultsTrain_sampled[:1000], model, optimizer, epochIdx, validateOnly=True)
-        # print(f'train losses: {trainLoss[:epochIdx+1]}')
         fig = plt.subplots(figsize=(24, 10))
         plt.plot(trainLoss[:epochIdx + 1])
         plt.xlabel('epochs')
         plt.savefig('./trainLoss.png')
         plt.show()
+        print(f'train loss: {trainLoss[epochIdx]}')
+        #try:
+        #validateLoss, probabilitiesLUT = trainFunc(sentencesAudioInputMatrixValidate, sentencesEstimationResultsValidate_sampled, sentencesEstimationPitchResultsValidate_sampled, model, optimizer, epochIdx, validateOnly=True)
+        validateLoss, probabilitiesLUT = trainFunc(sentencesAudioInputMatrixTrain[:1000], sentencesEstimationResultsTrain_sampled[:1000], sentencesEstimationPitchResultsTrain_sampled[:1000], model, optimizer, epochIdx, validateOnly=True, enableSimpleClassification=enableSimpleClassification)
         print(f'train loss: {trainLoss[epochIdx]}; validation loss: {validateLoss}')
+        # print(f'train losses: {trainLoss[:epochIdx+1]}')
         plotSentenceResults(sentencesEstimationResultsValidate, maleIdx, femaleIdx, path2FigValidate.split('.png')[0] + '_epoch_%d' % epochIdx + '.png', sentencesEstimationResults_NN=probabilitiesLUT)
+        #except:
+        #    x=0
 
 # Discussion:
 '''

@@ -1297,14 +1297,24 @@ def createSentencesDataset(metadata, path2SentencesResults, path2SentencesMetada
             sentencesEstimationResults = createSentencesEstimationResults(sentencesDatasetsFeatures, sentencesDatasetsPitch, metadata, path2SentencesResults, path2WordModels, path2SpeakerModels, path2GenderModels, transitionMat, priorStates, trainOnLessFeatures=True, enableMahalanobisCala=False, chosenFeatures=chosenFeatures)
     return sentencesEstimationResults
 
-def sampleFromSmoothing(sentencesEstimationResults):
+def sampleFromSmoothing(sentencesEstimationResults, enableSimpleClassification=False):
     sentencesEstimationResults_sampled = np.zeros((len(sentencesEstimationResults), 4)) # saving as matrix. every row has [gender, speaker, word, pitch]
     for sentenceIdx, sentence in enumerate(sentencesEstimationResults):
-        sentenceResults = sentence['results']
-        # extract multinomial probs:
-        genderProbs, speakerProbs, wordProbs = sentenceResults['gender']['smoothing'][0], sentenceResults['speaker']['smoothing'][0], sentenceResults['word']['smoothing'][0]
-        # sample:
-        sampledGender, sampledSpeaker, sampledWord = int(np.argwhere(np.random.multinomial(1, pvals=genderProbs))), int(np.argwhere(np.random.multinomial(1, pvals=speakerProbs))), int(np.argwhere(np.random.multinomial(1, pvals=wordProbs)))
+        if enableSimpleClassification:
+            sentenceResults = sentence['groundTruth']
+            sentenceResults['pitch'] = sentence['results']['pitch']
+            if sentenceResults['SpeakerGender'] == 'male':
+                sampledGender = 1
+            else:
+                sampledGender = 0
+            sampledSpeaker = int(sentenceResults['SpeakerNo'])
+            sampledWord = sentenceResults['Digits'][0]
+        else:
+            sentenceResults = sentence['results']
+            # extract multinomial probs:
+            genderProbs, speakerProbs, wordProbs = sentenceResults['gender']['smoothing'][0], sentenceResults['speaker']['smoothing'][0], sentenceResults['word']['smoothing'][0]
+            # sample:
+            sampledGender, sampledSpeaker, sampledWord = int(np.argwhere(np.random.multinomial(1, pvals=genderProbs))), int(np.argwhere(np.random.multinomial(1, pvals=speakerProbs))), int(np.argwhere(np.random.multinomial(1, pvals=wordProbs)))
         sampledPitchMixture = int(np.argwhere(np.random.multinomial(1, pvals=sentenceResults['pitch']['smoothing']['weights'])))
         pitchMean, pitchStd = sentenceResults['pitch']['smoothing']['means'][sampledPitchMixture], np.sqrt(sentenceResults['pitch']['smoothing']['covs'][sampledPitchMixture])
         sampledPitch = np.random.normal(loc=pitchMean, scale=pitchStd)
@@ -1373,7 +1383,7 @@ class VAE(nn.Module):
         z = self.reparameterize(mu.repeat(self.nDrawsFromSingleEncoderOutput, 1), logvar.repeat(self.nDrawsFromSingleEncoderOutput, 1))
         decoderOut = self.decode(z)
         genderProbs, speakerProbs, wordProbs, pitchMean, pitchLogVar = decoderOut[:, :self.genderMultivariate], decoderOut[:, self.genderMultivariate:self.genderMultivariate+self.speakerMultivariate], decoderOut[:, self.genderMultivariate+self.speakerMultivariate : self.genderMultivariate+self.speakerMultivariate+self.wordMultivariate], decoderOut[:, self.genderMultivariate+self.speakerMultivariate+self.wordMultivariate : self.genderMultivariate+self.speakerMultivariate+self.wordMultivariate+1], decoderOut[:, self.genderMultivariate+self.speakerMultivariate+self.wordMultivariate+1 : self.genderMultivariate+self.speakerMultivariate+self.wordMultivariate+2]
-        return genderProbs, speakerProbs, wordProbs, pitchMean, pitchLogVar, mu, logvar  # , z
+        return genderProbs, speakerProbs, wordProbs, pitchMean, pitchLogVar, mu, logvar, z
 
 
 # takes in a module and applies the specified weight initialization
@@ -1387,6 +1397,11 @@ def weights_init_uniform_rule(m):
         m.weight.data.uniform_(-y, y)
         m.bias.data.fill_(0)
 
+def loss_function_classification_prob(wordProbs, sampledWord):
+    nDecoders = 1
+    sampledWord = sampledWord.unsqueeze(1).repeat(nDecoders, 1).reshape(-1)
+    wordNLL = F.cross_entropy(wordProbs, sampledWord, reduction='none')
+    return wordNLL
 
 def loss_function(mu, logvar, genderProbs, speakerProbs, wordProbs, pitchMean, pitchLogVar, sampledGender, sampledSpeaker, sampledWord, sampledPitch, nDecoders):
     batchSize = sampledWord.numel()
@@ -1417,7 +1432,7 @@ def loss_function(mu, logvar, genderProbs, speakerProbs, wordProbs, pitchMean, p
     '''
 
     #totalNLL_max = (genderNLL+speakerNLL+wordNLL+pitchNLL).reshape(-1, batchSize).max(dim=0)[0].sum()  # each column has the nDecoders different outputs from the same encoder's output, then max is performed
-    totalNLL_max = (speakerNLL).reshape(-1, batchSize).max(dim=0)[0].sum()
+    totalNLL_max = (wordNLL).reshape(-1, batchSize).max(dim=0)[0].sum()
 
     KLD = -0.5 * torch.sum(1 + logvar - mu.pow(2) - logvar.exp())
 
@@ -1456,7 +1471,7 @@ def getProbabilitiesLUT(genderProbs, speakerProbs, wordProbs, pitchMean, pitchLo
         probabilitiesLUT.append([clustersWeights, clustersRepresentatives])
     return probabilitiesLUT
 
-def trainFunc(sentencesAudioInputMatrix, sentencesEstimationResults_sampled, sentencesEstimationPitchResults_sampled, model, optimizer, epoch, validateOnly=False):
+def trainFunc(sentencesAudioInputMatrix, sentencesEstimationResults_sampled, sentencesEstimationPitchResults_sampled, model, optimizer, epoch, validateOnly=False, enableSimpleClassification=False):
     if validateOnly:
         model.eval()
     else:
@@ -1483,9 +1498,14 @@ def trainFunc(sentencesAudioInputMatrix, sentencesEstimationResults_sampled, sen
         sampledGender, sampledSpeaker, sampledWord, sampledPitch = labels[:, 0], labels[:, 1], labels[:, 2], pitchLabels[:, 0]
 
         if not validateOnly: optimizer.zero_grad()
-        genderProbs, speakerProbs, wordProbs, pitchMean, pitchLogVar, mu, logvar = model(data)
+        genderProbs, speakerProbs, wordProbs, pitchMean, pitchLogVar, mu, logvar, z = model(data)
         # t = time.time()
-        loss = loss_function(mu, logvar, genderProbs, speakerProbs, wordProbs, pitchMean, pitchLogVar, sampledGender, sampledSpeaker, sampledWord, sampledPitch, model.nDrawsFromSingleEncoderOutput)
+
+        if enableSimpleClassification:
+            loss = loss_function_classification_prob(z, sampledWord)
+        else:
+            loss = loss_function(mu, logvar, genderProbs, speakerProbs, wordProbs, pitchMean, pitchLogVar, sampledGender, sampledSpeaker, sampledWord, sampledPitch, model.nDrawsFromSingleEncoderOutput)
+
         # print('loss function duration: ', 1000*(time.time()-t), ' ms')
         if not validateOnly: loss.backward()
         total_loss += loss.item() / batchSize
