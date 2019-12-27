@@ -1324,6 +1324,7 @@ def sampleFromSmoothing(sentencesEstimationResults, enableSimpleClassification=F
 
 def generateAudioMatrix(sentencesDatasetsAudio, nSamplesInSingleLSTM_input, enableSpectrogram):
     maxSentenceLengh = 0
+    nSentences = len(sentencesDatasetsAudio)
     for sentenceIdx, sentence in enumerate(sentencesDatasetsAudio):
         if len(sentence[1][1]) > maxSentenceLengh: maxSentenceLengh = len(sentence[1][1])
     sentenceAudioMat = np.zeros((len(sentencesDatasetsAudio), maxSentenceLengh))
@@ -1335,7 +1336,17 @@ def generateAudioMatrix(sentencesDatasetsAudio, nSamplesInSingleLSTM_input, enab
     if enableSpectrogram:
         f, t, Sxx = signal.spectrogram(x=sentenceAudioMat, fs=48000, nperseg=nSamplesInSingleLSTM_input, return_onesided=True, axis=0)
         # plt.pcolormesh(t, f, Sxx[:,0,:])
-        sentenceAudioMat = Sxx.transpose(3, 1, 0, 2).squeeze(axis=-1)
+        # scale:
+        scaler = StandardScaler()
+        '''
+        Sxx2 = Sxx.transpose(1, 3, 0, 2).squeeze(axis=-1)  # [sample, time, feature]
+        Sxx3 = Sxx2.reshape(nSentences, -1)  # [sample, time*feature]                
+        Sxx3_scaled = scaler.fit_transform(Sxx3)
+        Sxx4 = Sxx3.reshape(nSentences, t.shape[0], f.shape[0])  # [sample, time, feature]        
+        sentenceAudioMat = Sxx4.transpose(1, 0, 2)
+        '''
+        sentenceAudioMat = scaler.fit_transform(Sxx.transpose(1, 3, 0, 2).squeeze(axis=-1).reshape(nSentences, -1)).reshape(nSentences, t.shape[0], f.shape[0]).transpose(1, 0, 2)
+
     return sentenceAudioMat
 
 class VAE(nn.Module):
@@ -1356,9 +1367,11 @@ class VAE(nn.Module):
         self.fc21 = nn.Linear(lstmHiddenSize, self.zDim)
         self.fc22 = nn.Linear(lstmHiddenSize, self.zDim)
 
+        self.dropout = nn.Dropout(p=0.4)
+
         # decoder:
         self.fc3 = nn.Linear(self.zDim, self.decoderInnerWidth)
-        # self.fc4 = nn.Linear(self.decoderInnerWidth, self.decoderInnerWidth)
+        self.fc4 = nn.Linear(self.decoderInnerWidth, self.decoderInnerWidth)
         self.fc5 = nn.Linear(self.decoderInnerWidth, self.genderMultivariate + self.speakerMultivariate + self.wordMultivariate + 2*self.nContinuesParameters)
 
         # general:
@@ -1369,7 +1382,8 @@ class VAE(nn.Module):
 
     def encode(self, y):
         output, (hn, cn) = self.kalmanLSTM(y)
-        return self.fc21(hn[0]), self.fc22(hn[0])
+        postDropout = self.dropout(hn[0])
+        return self.fc21(postDropout), self.fc22(postDropout)
 
     def reparameterize(self, mu, logvar):
         std = torch.exp(0.5*logvar)
@@ -1378,10 +1392,10 @@ class VAE(nn.Module):
 
     def decode(self, z):
         h3 = self.LeakyReLU(self.fc3(z))
-        #h4 = self.tanh(self.fc4(h3))
+        h4 = self.tanh(self.fc4(h3))
         #return self.logSoftMax(self.fc5(h3)) # h3 here performed good without p(z) constrain
         #return torch.sigmoid(self.fc5(h3))  # h3 here performed good without p(z) constrain
-        h5 = self.fc5(h3)
+        h5 = self.fc5(h4)
         return h5 # h3 here performed good without p(z) constrain
 
     def forward(self, y):

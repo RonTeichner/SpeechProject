@@ -65,7 +65,7 @@ nGenders = 2
 femaleIdx, maleIdx = np.arange(nGenders)
 
 fs = 48000  # Hz
-processingDuration = 25e-3  # sec
+processingDuration = 12.5e-3  # sec
 nTimeDomainSamplesInSingleFrame = int(processingDuration*fs)
 
 sentencesDatasetsAudioTrain = pickle.load(open(path2SentencesAudioTrain, "rb"))
@@ -87,10 +87,10 @@ if enableSpectrogram:
 else:
     nSamplesInSingleLSTM_input = nTimeDomainSamplesInSingleFrame
 
-model = VAE(measDim=nSamplesInSingleLSTM_input, lstmHiddenSize=60, lstmNumLayers=4, nDrawsFromSingleEncoderOutput=10, zDim=60).cuda()
+model = VAE(measDim=nSamplesInSingleLSTM_input, lstmHiddenSize=50, lstmNumLayers=3, nDrawsFromSingleEncoderOutput=10, zDim=20).cuda()
 optimizer = optim.Adam(model.parameters(), lr=1e-3)
 
-nSentencesForTrain = sentencesEstimationResultsTrain_sampled.shape[0]  # 1000
+nSentencesForTrain = sentencesEstimationResultsTrain_sampled.shape[0]  # 100
 
 sentencesEstimationPitchResultsTrain_sampled = torch.tensor(sentencesEstimationResultsTrain_sampled[:nSentencesForTrain, 3:4], dtype=torch.float16).cuda()
 sentencesEstimationResultsTrain_sampled = torch.tensor(sentencesEstimationResultsTrain_sampled[:nSentencesForTrain, :3], dtype=torch.uint8).cuda()
@@ -118,7 +118,11 @@ for epochIdx in range(nEpochs):
 
         validateLoss, probabilitiesLUT = trainFunc(sentencesAudioInputMatrixValidate, sentencesEstimationResultsValidate_sampled, sentencesEstimationPitchResultsValidate_sampled, model, optimizer, epochIdx, validateOnly=True, enableSpectrogram=enableSpectrogram, enableSimpleClassification=enableWordOnlyClassificationAtEncoderOutput)
         plotSentenceResults(sentencesEstimationResultsValidate, maleIdx, femaleIdx, path2FigValidate.split('.png')[0] + '_epoch_%d' % epochIdx + '.png', sentencesEstimationResults_NN=probabilitiesLUT)
+
+        validateLoss, probabilitiesLUT = trainFunc(sentencesAudioInputMatrixTrain[:, :1000], sentencesEstimationResultsTrain_sampled[:1000], sentencesEstimationPitchResultsTrain_sampled[:1000], model, optimizer, epochIdx, validateOnly=True, enableSpectrogram=enableSpectrogram, enableSimpleClassification=enableWordOnlyClassificationAtEncoderOutput)
+        plotSentenceResults(sentencesEstimationResultsTrain[:1000], maleIdx, femaleIdx, path2FigValidate.split('.png')[0] + '_Trainepoch_%d' % epochIdx + '.png', sentencesEstimationResults_NN=probabilitiesLUT)
         '''
+        
         validateLoss, probabilitiesLUT = trainFunc(sentencesAudioInputMatrixTrain[:, :1000], sentencesEstimationResultsTrain_sampled[:1000], sentencesEstimationPitchResultsTrain_sampled[:1000], model, optimizer, epochIdx, validateOnly=True, enableSpectrogram=enableSpectrogram, enableSimpleClassification=enableWordOnlyClassificationAtEncoderOutput)
         if enableWordOnlyClassificationAtEncoderOutput:
             wordVecLUT, wordVecResults = wordVecFromProbabilitiesLUT(probabilitiesLUT), sentencesEstimationResultsTrain_sampled[:1000, -1].cpu().numpy()  # wordVecFromResults(sentencesEstimationResultsTrain[:1000])
