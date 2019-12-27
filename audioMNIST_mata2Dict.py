@@ -9,6 +9,7 @@ from scipy.spatial.distance import mahalanobis as calcMahalanobis
 from scipy import signal
 from speakerfeatures import *
 import matplotlib.pyplot as plt
+import matplotlib as mpl
 import random
 import pickle
 from hmmlearn.hmm import GMMHMM as GMMHMM
@@ -1335,7 +1336,7 @@ def generateAudioMatrix(sentencesDatasetsAudio, nSamplesInSingleLSTM_input, enab
     sentenceAudioMat = np.expand_dims(sentenceAudioMat.transpose(), axis=2)  # [time, sentenceIdx, feature]
     if enableSpectrogram:
         f, t, Sxx = signal.spectrogram(x=sentenceAudioMat, fs=48000, nperseg=nSamplesInSingleLSTM_input, return_onesided=True, axis=0)
-        # plt.pcolormesh(t, f, Sxx[:,0,:])
+        # plt.pcolormesh(t, f, Sxx[:,0,0,:])
         # scale:
         scaler = StandardScaler()
         '''
@@ -1346,7 +1347,13 @@ def generateAudioMatrix(sentencesDatasetsAudio, nSamplesInSingleLSTM_input, enab
         sentenceAudioMat = Sxx4.transpose(1, 0, 2)
         '''
         sentenceAudioMat = scaler.fit_transform(Sxx.transpose(1, 3, 0, 2).squeeze(axis=-1).reshape(nSentences, -1)).reshape(nSentences, t.shape[0], f.shape[0]).transpose(1, 0, 2)
-
+        '''
+        plt.subplot(1,2,1)
+        plt.pcolormesh(t, f, Sxx[:, 0, 0, :], norm=mpl.colors.Normalize(vmin=-1., vmax=1.))
+        plt.subplot(1,2,2)
+        plt.pcolormesh(t, f, sentenceAudioMat[:, 0, :].transpose(), norm=mpl.colors.Normalize(vmin=-1., vmax=1.))
+        plt.show()
+        '''
     return sentenceAudioMat
 
 class VAE(nn.Module):
