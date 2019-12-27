@@ -65,7 +65,7 @@ nGenders = 2
 femaleIdx, maleIdx = np.arange(nGenders)
 
 fs = 48000  # Hz
-processingDuration = 12.5e-3  # sec
+processingDuration = 25e-3  # sec
 nTimeDomainSamplesInSingleFrame = int(processingDuration*fs)
 
 sentencesDatasetsAudioTrain = pickle.load(open(path2SentencesAudioTrain, "rb"))
@@ -78,7 +78,7 @@ sentencesEstimationResultsValidate = pickle.load(open(path2SentencesResultsValid
 sentencesEstimationResultsTrain_sampled = sampleFromSmoothing(sentencesEstimationResultsTrain, enableTrain_wrt_groundTruth)
 
 # prepare the encoder input as a matrix by zero-padding the audio samples to have equal lengths:
-sentencesAudioInputMatrixTrain = generateAudioMatrix(sentencesDatasetsAudioTrain, nTimeDomainSamplesInSingleFrame, enableSpectrogram)
+sentencesAudioInputMatrixTrain = generateAudioMatrix(sentencesDatasetsAudioTrain, nTimeDomainSamplesInSingleFrame, enableSpectrogram, fs)
 
 #model = VAE(measDim=nSamplesIn SingleLSTM_input, lstmHiddenSize=12, lstmNumLayers=1, nDrawsFromSingleEncoderOutput=100, zDim=10).cuda()
 
@@ -87,7 +87,7 @@ if enableSpectrogram:
 else:
     nSamplesInSingleLSTM_input = nTimeDomainSamplesInSingleFrame
 
-model = VAE(measDim=nSamplesInSingleLSTM_input, lstmHiddenSize=50, lstmNumLayers=3, nDrawsFromSingleEncoderOutput=10, zDim=20).cuda()
+model = VAE(measDim=nSamplesInSingleLSTM_input, lstmHiddenSize=12, lstmNumLayers=1, nDrawsFromSingleEncoderOutput=10, zDim=40).cuda()
 optimizer = optim.Adam(model.parameters(), lr=1e-3)
 
 nSentencesForTrain = sentencesEstimationResultsTrain_sampled.shape[0]  # 100
@@ -98,7 +98,7 @@ sentencesAudioInputMatrixTrain = torch.tensor(sentencesAudioInputMatrixTrain[:, 
 
 # variables for validation:
 sentencesEstimationResultsValidate_sampled = sampleFromSmoothing(sentencesEstimationResultsValidate, enableTrain_wrt_groundTruth)
-sentencesAudioInputMatrixValidate = torch.tensor(generateAudioMatrix(sentencesDatasetsAudioValidate, nTimeDomainSamplesInSingleFrame, enableSpectrogram), dtype=torch.float32).cuda()
+sentencesAudioInputMatrixValidate = torch.tensor(generateAudioMatrix(sentencesDatasetsAudioValidate, nTimeDomainSamplesInSingleFrame, enableSpectrogram, fs), dtype=torch.float32).cuda()
 sentencesEstimationPitchResultsValidate_sampled = torch.tensor(sentencesEstimationResultsValidate_sampled[:, 3:4], dtype=torch.float16).cuda()
 sentencesEstimationResultsValidate_sampled = torch.tensor(sentencesEstimationResultsValidate_sampled[:, :3], dtype=torch.uint8).cuda()
 

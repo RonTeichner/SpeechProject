@@ -1323,7 +1323,7 @@ def sampleFromSmoothing(sentencesEstimationResults, enableSimpleClassification=F
         sentencesEstimationResults_sampled[sentenceIdx] = np.array([sampledGender, sampledSpeaker, sampledWord, sampledPitch])
     return sentencesEstimationResults_sampled
 
-def generateAudioMatrix(sentencesDatasetsAudio, nSamplesInSingleLSTM_input, enableSpectrogram):
+def generateAudioMatrix(sentencesDatasetsAudio, nSamplesInSingleLSTM_input, enableSpectrogram, fs):
     maxSentenceLengh = 0
     nSentences = len(sentencesDatasetsAudio)
     for sentenceIdx, sentence in enumerate(sentencesDatasetsAudio):
@@ -1335,8 +1335,11 @@ def generateAudioMatrix(sentencesDatasetsAudio, nSamplesInSingleLSTM_input, enab
         sentenceAudioMat[sentenceIdx] = zeroPaddedWav
     sentenceAudioMat = np.expand_dims(sentenceAudioMat.transpose(), axis=2)  # [time, sentenceIdx, feature]
     if enableSpectrogram:
-        f, t, Sxx = signal.spectrogram(x=sentenceAudioMat, fs=48000, nperseg=nSamplesInSingleLSTM_input, return_onesided=True, axis=0)
+        f, t, Sxx = signal.spectrogram(x=sentenceAudioMat, fs=fs, nperseg=nSamplesInSingleLSTM_input, return_onesided=True, axis=0)
         # plt.pcolormesh(t, f, Sxx[:,0,0,:])
+        # remove frequencies above fs/5:
+        fsFactor = 5
+        SxxFreqCropped = Sxx[np.where(f < fs / fsFactor)[0]]
         # scale:
         scaler = StandardScaler()
         '''
@@ -1346,7 +1349,7 @@ def generateAudioMatrix(sentencesDatasetsAudio, nSamplesInSingleLSTM_input, enab
         Sxx4 = Sxx3.reshape(nSentences, t.shape[0], f.shape[0])  # [sample, time, feature]        
         sentenceAudioMat = Sxx4.transpose(1, 0, 2)
         '''
-        sentenceAudioMat = scaler.fit_transform(Sxx.transpose(1, 3, 0, 2).squeeze(axis=-1).reshape(nSentences, -1)).reshape(nSentences, t.shape[0], f.shape[0]).transpose(1, 0, 2)
+        sentenceAudioMat = scaler.fit_transform(SxxFreqCropped.transpose(1, 3, 0, 2).squeeze(axis=-1).reshape(nSentences, -1)).reshape(nSentences, t.shape[0], np.where(f < fs / fsFactor)[0].shape[0]).transpose(1, 0, 2)
         '''
         plt.subplot(1,2,1)
         plt.pcolormesh(t, f, Sxx[:, 0, 0, :], norm=mpl.colors.Normalize(vmin=-1., vmax=1.))
@@ -1374,7 +1377,7 @@ class VAE(nn.Module):
         self.fc21 = nn.Linear(lstmHiddenSize, self.zDim)
         self.fc22 = nn.Linear(lstmHiddenSize, self.zDim)
 
-        self.dropout = nn.Dropout(p=0.4)
+        self.dropout = nn.Dropout(p=0.2)
 
         # decoder:
         self.fc3 = nn.Linear(self.zDim, self.decoderInnerWidth)
@@ -1523,7 +1526,7 @@ def trainFunc(sentencesAudioInputMatrix, sentencesEstimationResults_sampled, sen
     if validateOnly: probabilitiesLUT = list()
     if enableSimpleClassification: nCorrectPredictions = 0.0
     for batchIdx in range(nBatches):
-        if batchIdx % 10 == 0: print('epoch %d: starting batch %d out of %d' % (epoch, batchIdx, nBatches))
+        if batchIdx == 0: print('epoch %d: starting batch %d out of %d' % (epoch, batchIdx, nBatches))
         data = sentencesAudioInputMatrix[:, batchIdx * batchSize:(batchIdx + 1) * batchSize].float()
         # crop beginning to have integer size of model.measDim and then reshape to have model.measDim features:
         if not enableSpectrogram:
