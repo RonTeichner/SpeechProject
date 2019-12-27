@@ -1161,7 +1161,8 @@ def plotSentenceResults(sentencesEstimationResults, maleIdx, femaleIdx, path2fig
                 plt.xlabel('likelihood')
     plt.savefig(path2fig)
     print('fig saved')
-    plt.show()
+    plt.close()
+    #plt.show()
 
 
 def calcStdOfMixOf2(means, covs, weights):
@@ -1366,7 +1367,7 @@ class VAE(nn.Module):
         self.nDrawsFromSingleEncoderOutput = nDrawsFromSingleEncoderOutput
         self.measDim = measDim
         self.zDim = zDim
-        self.decoderInnerWidth = 5
+        self.decoderInnerWidth = 100
         self.genderMultivariate = 2
         self.speakerMultivariate = 60
         self.wordMultivariate = 10
@@ -1435,7 +1436,7 @@ def loss_function_classification_prob(wordProbs, sampledWord):
     nCorrectPredictions = (F.softmax(wordProbs, dim=1).argmax(dim=1) == sampledWord).sum()
     return wordNLL.reshape(-1, batchSize).sum(), nCorrectPredictions
 
-def loss_function(mu, logvar, genderProbs, speakerProbs, wordProbs, pitchMean, pitchLogVar, sampledGender, sampledSpeaker, sampledWord, sampledPitch, nDecoders):
+def loss_function(beta, mu, logvar, genderProbs, speakerProbs, wordProbs, pitchMean, pitchLogVar, sampledGender, sampledSpeaker, sampledWord, sampledPitch, nDecoders):
     batchSize = sampledWord.numel()
 
     sampledGender = sampledGender.unsqueeze(1).repeat(nDecoders, 1).reshape(-1)
@@ -1473,7 +1474,7 @@ def loss_function(mu, logvar, genderProbs, speakerProbs, wordProbs, pitchMean, p
 
     KLD = -0.5 * torch.sum(1 + logvar - mu.pow(2) - logvar.exp())
 
-    return totalNLL_max# + KLD
+    return totalNLL_max + beta*KLD
 
 def getProbabilitiesLUT(genderProbs, speakerProbs, wordProbs, pitchMean, pitchLogVar, nDecoders):
     batchSize = int(genderProbs.shape[0]/nDecoders)
@@ -1508,7 +1509,7 @@ def getProbabilitiesLUT(genderProbs, speakerProbs, wordProbs, pitchMean, pitchLo
         probabilitiesLUT.append([clustersWeights, clustersRepresentatives])
     return probabilitiesLUT
 
-def trainFunc(sentencesAudioInputMatrix, sentencesEstimationResults_sampled, sentencesEstimationPitchResults_sampled, model, optimizer, epoch, validateOnly=False, enableSpectrogram=False, enableSimpleClassification=False):
+def trainFunc(beta, sentencesAudioInputMatrix, sentencesEstimationResults_sampled, sentencesEstimationPitchResults_sampled, model, optimizer, epoch, validateOnly=False, enableSpectrogram=False, enableSimpleClassification=False):
     if validateOnly:
         model.eval()
     else:
@@ -1523,6 +1524,17 @@ def trainFunc(sentencesAudioInputMatrix, sentencesEstimationResults_sampled, sen
 
     inputSentenceIndexes = torch.randperm(nSentences)
     sentencesAudioInputMatrix, sentencesEstimationResults_sampled, sentencesEstimationPitchResults_sampled = sentencesAudioInputMatrix[:, inputSentenceIndexes], sentencesEstimationResults_sampled[inputSentenceIndexes], sentencesEstimationPitchResults_sampled[inputSentenceIndexes]
+
+    '''
+    # time shift for augmenting the data:
+    if not validateOnly:
+        shiftBy = torch.randint(0, int(sentencesAudioInputMatrix.shape[0] / 4), (1,))
+        if torch.randint(0,2,(1,)) == 1:
+            sentencesAudioInputMatrix = torch.cat((sentencesAudioInputMatrix[shiftBy:], sentencesAudioInputMatrix[:shiftBy]), dim=0)
+        else:
+            sentencesAudioInputMatrix = torch.cat((sentencesAudioInputMatrix[-shiftBy:], sentencesAudioInputMatrix[:-shiftBy]), dim=0)
+    '''
+
     if validateOnly: probabilitiesLUT = list()
     if enableSimpleClassification: nCorrectPredictions = 0.0
     for batchIdx in range(nBatches):
@@ -1544,7 +1556,7 @@ def trainFunc(sentencesAudioInputMatrix, sentencesEstimationResults_sampled, sen
             loss, nCorrectPredictionsSingleBatch = loss_function_classification_prob(z, sampledWord)
             nCorrectPredictions += nCorrectPredictionsSingleBatch.float()/batchSize
         else:
-            loss = loss_function(mu, logvar, genderProbs, speakerProbs, wordProbs, pitchMean, pitchLogVar, sampledGender, sampledSpeaker, sampledWord, sampledPitch, model.nDrawsFromSingleEncoderOutput)
+            loss = loss_function(beta, mu, logvar, genderProbs, speakerProbs, wordProbs, pitchMean, pitchLogVar, sampledGender, sampledSpeaker, sampledWord, sampledPitch, model.nDrawsFromSingleEncoderOutput)
 
         # print('loss function duration: ', 1000*(time.time()-t), ' ms')
         if not validateOnly: loss.backward()

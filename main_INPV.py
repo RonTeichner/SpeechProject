@@ -87,7 +87,8 @@ if enableSpectrogram:
 else:
     nSamplesInSingleLSTM_input = nTimeDomainSamplesInSingleFrame
 
-model = VAE(measDim=nSamplesInSingleLSTM_input, lstmHiddenSize=12, lstmNumLayers=1, nDrawsFromSingleEncoderOutput=10, zDim=40).cuda()
+beta = 0.1
+model = VAE(measDim=nSamplesInSingleLSTM_input, lstmHiddenSize=12, lstmNumLayers=1, nDrawsFromSingleEncoderOutput=1, zDim=10).cuda()
 optimizer = optim.Adam(model.parameters(), lr=1e-3)
 
 nSentencesForTrain = sentencesEstimationResultsTrain_sampled.shape[0]  # 100
@@ -106,20 +107,21 @@ sentencesEstimationResultsValidate_sampled = torch.tensor(sentencesEstimationRes
 nEpochs = 100000
 trainLoss = np.zeros(nEpochs)
 for epochIdx in range(nEpochs):
-    trainLoss[epochIdx], _ = trainFunc(sentencesAudioInputMatrixTrain, sentencesEstimationResultsTrain_sampled, sentencesEstimationPitchResultsTrain_sampled, model, optimizer, epochIdx, validateOnly=False, enableSpectrogram=enableSpectrogram, enableSimpleClassification=enableWordOnlyClassificationAtEncoderOutput)
+    trainLoss[epochIdx], _ = trainFunc(beta, sentencesAudioInputMatrixTrain, sentencesEstimationResultsTrain_sampled, sentencesEstimationPitchResultsTrain_sampled, model, optimizer, epochIdx, validateOnly=False, enableSpectrogram=enableSpectrogram, enableSimpleClassification=enableWordOnlyClassificationAtEncoderOutput)
     if epochIdx % 1000 == 0:
         fig = plt.subplots(figsize=(24, 10))
         plt.plot(trainLoss[:epochIdx + 1])
         plt.xlabel('epochs')
         plt.savefig('./trainLoss.png')
-        plt.show()
+        #plt.show()
+        plt.close()
         print(f'train loss: {trainLoss[epochIdx]}')
         #try:
 
-        validateLoss, probabilitiesLUT = trainFunc(sentencesAudioInputMatrixValidate, sentencesEstimationResultsValidate_sampled, sentencesEstimationPitchResultsValidate_sampled, model, optimizer, epochIdx, validateOnly=True, enableSpectrogram=enableSpectrogram, enableSimpleClassification=enableWordOnlyClassificationAtEncoderOutput)
+        validateLoss, probabilitiesLUT = trainFunc(beta, sentencesAudioInputMatrixValidate, sentencesEstimationResultsValidate_sampled, sentencesEstimationPitchResultsValidate_sampled, model, optimizer, epochIdx, validateOnly=True, enableSpectrogram=enableSpectrogram, enableSimpleClassification=enableWordOnlyClassificationAtEncoderOutput)
         plotSentenceResults(sentencesEstimationResultsValidate, maleIdx, femaleIdx, path2FigValidate.split('.png')[0] + '_epoch_%d' % epochIdx + '.png', sentencesEstimationResults_NN=probabilitiesLUT)
 
-        validateLoss, probabilitiesLUT = trainFunc(sentencesAudioInputMatrixTrain[:, :1000], sentencesEstimationResultsTrain_sampled[:1000], sentencesEstimationPitchResultsTrain_sampled[:1000], model, optimizer, epochIdx, validateOnly=True, enableSpectrogram=enableSpectrogram, enableSimpleClassification=enableWordOnlyClassificationAtEncoderOutput)
+        validateLoss, probabilitiesLUT = trainFunc(beta, sentencesAudioInputMatrixTrain[:, :1000], sentencesEstimationResultsTrain_sampled[:1000], sentencesEstimationPitchResultsTrain_sampled[:1000], model, optimizer, epochIdx, validateOnly=True, enableSpectrogram=enableSpectrogram, enableSimpleClassification=enableWordOnlyClassificationAtEncoderOutput)
         plotSentenceResults(sentencesEstimationResultsTrain[:1000], maleIdx, femaleIdx, path2FigValidate.split('.png')[0] + '_Trainepoch_%d' % epochIdx + '.png', sentencesEstimationResults_NN=probabilitiesLUT)
         '''
         
