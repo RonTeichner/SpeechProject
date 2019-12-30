@@ -62,7 +62,7 @@ path2sentencesAudioInputMatrixValidate = './sentencesAudioInputMatrixValidate.pt
 path2sentencesAudioInputMatrixTest = './sentencesAudioInputMatrixTest.pt'
 
 enableWordOnlyClassificationAtEncoderOutput = False
-enableTrain_wrt_groundTruth = True
+enableTrain_wrt_groundTruth = False
 enableSpectrogram = True
 
 nGenders = 2
@@ -115,7 +115,7 @@ if enableSpectrogram:
 else:
     nSamplesInSingleLSTM_input = nTimeDomainSamplesInSingleFrame
 
-beta = 0.001 #0.0025  # [0.005, 0.001]
+beta = 0.01 #0.0025  # [0.005, 0.001]
 model = VAE(measDim=nSamplesInSingleLSTM_input, lstmHiddenSize=80, lstmNumLayers=1, nDrawsFromSingleEncoderOutput=4, zDim=50).cuda()
 optimizer = optim.Adam(model.parameters(), lr=1e-3)
 # optimizer = optim.SGD(model.parameters(), lr=1e-4, momentum=0)
@@ -140,7 +140,7 @@ optimizer = optim.Adam(model.parameters(), lr=1e-3)
 # zDim = 3 with beta = 0.01 - nothing. zDim = 3 with beta = 0: overfit. It seems to be hard to find the point where there is no overfit.
 
 
-nSentencesForTrain = 80000  # sentencesEstimationResultsTrain_sampled.shape[0]  # 100
+nSentencesForTrain = len(sentencesEstimationResultsTrain)
 
 # sample from results dataset to obtain the 'deterministic' dataset:
 sentencesEstimationResultsTrain_sampled = sampleFromSmoothing(sentencesEstimationResultsTrain, enableTrain_wrt_groundTruth)
@@ -156,6 +156,7 @@ sentencesAudioInputMatrixValidate = torch.tensor(sentencesAudioInputMatrixValida
 
 
 # variables for test:
+print('nSentences in test: %d' % len(sentencesAudioInputMatrixTest))
 sentencesEstimationResultsTest_sampled = sampleFromSmoothing(sentencesEstimationResultsTest, enableTrain_wrt_groundTruth)
 sentencesEstimationPitchResultsTest_sampled = torch.tensor(sentencesEstimationResultsTest_sampled[:, 3:4], dtype=torch.float16).cuda()
 sentencesEstimationResultsTest_sampled = torch.tensor(sentencesEstimationResultsTest_sampled[:, :3], dtype=torch.uint8).cuda()
