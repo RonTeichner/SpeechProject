@@ -59,9 +59,10 @@ path2FigTest = './SentencesFigTest.png'
 
 path2sentencesAudioInputMatrixTrain = './sentencesAudioInputMatrixTrain.pt'
 path2sentencesAudioInputMatrixValidate = './sentencesAudioInputMatrixValidate.pt'
+path2sentencesAudioInputMatrixTest = './sentencesAudioInputMatrixTest.pt'
 
 enableWordOnlyClassificationAtEncoderOutput = False
-enableTrain_wrt_groundTruth = False
+enableTrain_wrt_groundTruth = True
 enableSpectrogram = True
 
 nGenders = 2
@@ -74,9 +75,7 @@ nTimeDomainSamplesInSingleFrame = int(processingDuration*fs)
 
 sentencesEstimationResultsTrain = pickle.load(open(path2SentencesResultsTrain, "rb"))
 sentencesEstimationResultsValidate = pickle.load(open(path2SentencesResultsValidate, "rb"))
-
-# sample from results dataset to obtain the 'deterministic' dataset:
-sentencesEstimationResultsTrain_sampled = sampleFromSmoothing(sentencesEstimationResultsTrain, enableTrain_wrt_groundTruth)
+sentencesEstimationResultsTest = pickle.load(open(path2SentencesResultsTest, "rb"))
 
 # prepare the encoder input as a matrix by zero-padding the audio samples to have equal lengths:
 if os.path.isfile(path2sentencesAudioInputMatrixValidate):
@@ -85,6 +84,13 @@ else:
     sentencesDatasetsAudioValidate = pickle.load(open(path2SentencesAudioValidate, "rb"))
     sentencesAudioInputMatrixValidate = generateAudioMatrix(sentencesDatasetsAudioValidate, nTimeDomainSamplesInSingleFrame, enableSpectrogram, fs)
     pickle.dump(sentencesAudioInputMatrixValidate, open(path2sentencesAudioInputMatrixValidate, "wb"))
+
+if os.path.isfile(path2sentencesAudioInputMatrixTest):
+    sentencesAudioInputMatrixTest = pickle.load(open(path2sentencesAudioInputMatrixTest, "rb"))
+else:
+    sentencesDatasetsAudioTest = pickle.load(open(path2SentencesAudioTest, "rb"))
+    sentencesAudioInputMatrixTest = generateAudioMatrix(sentencesDatasetsAudioTest, nTimeDomainSamplesInSingleFrame, enableSpectrogram, fs)
+    pickle.dump(sentencesAudioInputMatrixTest, open(path2sentencesAudioInputMatrixTest, "wb"))
 
 if os.path.isfile(path2sentencesAudioInputMatrixTrain):
     sentencesAudioInputMatrixTrain = pickle.load(open(path2sentencesAudioInputMatrixTrain, "rb"))
@@ -109,8 +115,8 @@ if enableSpectrogram:
 else:
     nSamplesInSingleLSTM_input = nTimeDomainSamplesInSingleFrame
 
-beta = 0
-model = VAE(measDim=nSamplesInSingleLSTM_input, lstmHiddenSize=40, lstmNumLayers=1, nDrawsFromSingleEncoderOutput=4, zDim=3).cuda()
+beta = 0.001 #0.0025  # [0.005, 0.001]
+model = VAE(measDim=nSamplesInSingleLSTM_input, lstmHiddenSize=80, lstmNumLayers=1, nDrawsFromSingleEncoderOutput=4, zDim=50).cuda()
 optimizer = optim.Adam(model.parameters(), lr=1e-3)
 # optimizer = optim.SGD(model.parameters(), lr=1e-4, momentum=0)
 
@@ -134,24 +140,34 @@ optimizer = optim.Adam(model.parameters(), lr=1e-3)
 # zDim = 3 with beta = 0.01 - nothing. zDim = 3 with beta = 0: overfit. It seems to be hard to find the point where there is no overfit.
 
 
-nSentencesForTrain = sentencesEstimationResultsTrain_sampled.shape[0]  # 100
+nSentencesForTrain = 80000  # sentencesEstimationResultsTrain_sampled.shape[0]  # 100
 
+# sample from results dataset to obtain the 'deterministic' dataset:
+sentencesEstimationResultsTrain_sampled = sampleFromSmoothing(sentencesEstimationResultsTrain, enableTrain_wrt_groundTruth)
 sentencesEstimationPitchResultsTrain_sampled = torch.tensor(sentencesEstimationResultsTrain_sampled[:nSentencesForTrain, 3:4], dtype=torch.float16).cuda()
 sentencesEstimationResultsTrain_sampled = torch.tensor(sentencesEstimationResultsTrain_sampled[:nSentencesForTrain, :3], dtype=torch.uint8).cuda()
 sentencesAudioInputMatrixTrain = torch.tensor(sentencesAudioInputMatrixTrain[:, :nSentencesForTrain], dtype=torch.float32).cuda()
 
 # variables for validation:
 sentencesEstimationResultsValidate_sampled = sampleFromSmoothing(sentencesEstimationResultsValidate, enableTrain_wrt_groundTruth)
-sentencesAudioInputMatrixValidate = torch.tensor(sentencesAudioInputMatrixValidate, dtype=torch.float32).cuda()
 sentencesEstimationPitchResultsValidate_sampled = torch.tensor(sentencesEstimationResultsValidate_sampled[:, 3:4], dtype=torch.float16).cuda()
 sentencesEstimationResultsValidate_sampled = torch.tensor(sentencesEstimationResultsValidate_sampled[:, :3], dtype=torch.uint8).cuda()
+sentencesAudioInputMatrixValidate = torch.tensor(sentencesAudioInputMatrixValidate, dtype=torch.float32).cuda()
+
+
+# variables for test:
+sentencesEstimationResultsTest_sampled = sampleFromSmoothing(sentencesEstimationResultsTest, enableTrain_wrt_groundTruth)
+sentencesEstimationPitchResultsTest_sampled = torch.tensor(sentencesEstimationResultsTest_sampled[:, 3:4], dtype=torch.float16).cuda()
+sentencesEstimationResultsTest_sampled = torch.tensor(sentencesEstimationResultsTest_sampled[:, :3], dtype=torch.uint8).cuda()
+sentencesAudioInputMatrixTest = torch.tensor(sentencesAudioInputMatrixTest, dtype=torch.float32).cuda()
 
 
 nEpochs = 100000
 trainLoss = np.zeros(nEpochs)
 for epochIdx in range(nEpochs):
     trainLoss[epochIdx], _ = trainFunc(beta, sentencesAudioInputMatrixTrain, sentencesEstimationResultsTrain_sampled, sentencesEstimationPitchResultsTrain_sampled, model, optimizer, epochIdx, validateOnly=False, enableSpectrogram=enableSpectrogram, enableSimpleClassification=enableWordOnlyClassificationAtEncoderOutput)
-    if epochIdx % 1000 == 0:
+    #trainLoss[epochIdx], _ = trainFunc(beta, sentencesAudioInputMatrixValidate, sentencesEstimationResultsValidate_sampled, sentencesEstimationPitchResultsValidate_sampled, model, optimizer, epochIdx, validateOnly=False, enableSpectrogram=enableSpectrogram, enableSimpleClassification=enableWordOnlyClassificationAtEncoderOutput)
+    if epochIdx % 100 == 0:
         fig = plt.subplots(figsize=(24, 10))
         plt.plot(trainLoss[:epochIdx + 1])
         plt.xlabel('epochs')
@@ -161,11 +177,15 @@ for epochIdx in range(nEpochs):
         print(f'train loss: {trainLoss[epochIdx]}')
         #try:
 
-        validateLoss, probabilitiesLUT = trainFunc(beta, sentencesAudioInputMatrixValidate, sentencesEstimationResultsValidate_sampled, sentencesEstimationPitchResultsValidate_sampled, model, optimizer, epochIdx, validateOnly=True, enableSpectrogram=enableSpectrogram, enableSimpleClassification=enableWordOnlyClassificationAtEncoderOutput)
-        plotSentenceResults(sentencesEstimationResultsValidate, maleIdx, femaleIdx, path2FigValidate.split('.png')[0] + '_epoch_%d' % epochIdx + '.png', sentencesEstimationResults_NN=probabilitiesLUT)
+        _, probabilitiesLUT = trainFunc(beta, sentencesAudioInputMatrixTrain[:, :1000], sentencesEstimationResultsTrain_sampled[:1000], sentencesEstimationPitchResultsTrain_sampled[:1000], model, optimizer, epochIdx, validateOnly=True, enableSpectrogram=enableSpectrogram, enableSimpleClassification=enableWordOnlyClassificationAtEncoderOutput)
+        plotSentenceResults('Train', sentencesEstimationResultsTrain[:1000], maleIdx, femaleIdx, path2FigValidate.split('.png')[0] + '_Trainepoch_%d' % epochIdx + '.png', sentencesEstimationResults_NN=probabilitiesLUT)
 
-        validateLoss, probabilitiesLUT = trainFunc(beta, sentencesAudioInputMatrixTrain[:, :1000], sentencesEstimationResultsTrain_sampled[:1000], sentencesEstimationPitchResultsTrain_sampled[:1000], model, optimizer, epochIdx, validateOnly=True, enableSpectrogram=enableSpectrogram, enableSimpleClassification=enableWordOnlyClassificationAtEncoderOutput)
-        plotSentenceResults(sentencesEstimationResultsTrain[:1000], maleIdx, femaleIdx, path2FigValidate.split('.png')[0] + '_Trainepoch_%d' % epochIdx + '.png', sentencesEstimationResults_NN=probabilitiesLUT)
+        validateLoss, probabilitiesLUT = trainFunc(beta, sentencesAudioInputMatrixValidate, sentencesEstimationResultsValidate_sampled, sentencesEstimationPitchResultsValidate_sampled, model, optimizer, epochIdx, validateOnly=True, enableSpectrogram=enableSpectrogram, enableSimpleClassification=enableWordOnlyClassificationAtEncoderOutput)
+        plotSentenceResults('Validate', sentencesEstimationResultsValidate, maleIdx, femaleIdx, path2FigValidate.split('.png')[0] + '_epoch_%d' % epochIdx + '.png', sentencesEstimationResults_NN=probabilitiesLUT)
+
+        testLoss, probabilitiesLUT = trainFunc(beta, sentencesAudioInputMatrixTest, sentencesEstimationResultsTest_sampled, sentencesEstimationPitchResultsTest_sampled, model, optimizer, epochIdx, validateOnly=True, enableSpectrogram=enableSpectrogram, enableSimpleClassification=enableWordOnlyClassificationAtEncoderOutput)
+        plotSentenceResults('Test', sentencesEstimationResultsTest, maleIdx, femaleIdx, path2FigTest.split('.png')[0] + '_epoch_%d' % epochIdx + '.png', sentencesEstimationResults_NN=probabilitiesLUT)
+
         '''
         
         validateLoss, probabilitiesLUT = trainFunc(sentencesAudioInputMatrixTrain[:, :1000], sentencesEstimationResultsTrain_sampled[:1000], sentencesEstimationPitchResultsTrain_sampled[:1000], model, optimizer, epochIdx, validateOnly=True, enableSpectrogram=enableSpectrogram, enableSimpleClassification=enableWordOnlyClassificationAtEncoderOutput)
@@ -174,7 +194,7 @@ for epochIdx in range(nEpochs):
             print('%% correct in epoch %d' % ((wordVecLUT.round() == wordVecResults.round()).sum()/len(wordVecLUT) * 100))
         plotSentenceResults(sentencesEstimationResultsTrain[:1000], maleIdx, femaleIdx, path2FigValidate.split('.png')[0] + '_epoch_%d' % epochIdx + '.png', sentencesEstimationResults_NN=probabilitiesLUT)
         '''
-        print(f'train loss: {trainLoss[epochIdx]}; validation loss: {validateLoss}')
+        print(f'train loss: {trainLoss[epochIdx]}; validation loss: {validateLoss}; test loss: {testLoss}')
         # print(f'train losses: {trainLoss[:epochIdx+1]}')
 
         #except:

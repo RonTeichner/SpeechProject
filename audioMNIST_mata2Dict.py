@@ -1046,7 +1046,7 @@ def computePitchDistribution(sentence):
         plt.show()
     return filteringDict, smoothingDict
 
-def plotSentenceResults(sentencesEstimationResults, maleIdx, femaleIdx, path2fig, sentencesEstimationResults_NN=None):
+def plotSentenceResults(testSet, sentencesEstimationResults, maleIdx, femaleIdx, path2fig, sentencesEstimationResults_NN=None):
     # convert model first-word estimations to np-arrays:
     genderIdx_NN, speakerIdx_NN, wordIdx_NN, pitchIdx_NN = np.arange(4)
     nSentences = len(sentencesEstimationResults)
@@ -1098,7 +1098,7 @@ def plotSentenceResults(sentencesEstimationResults, maleIdx, femaleIdx, path2fig
 
     # plot first-word estimation CDFs of true value:
     fig = plt.subplots(figsize=(24, 10))
-    plt.suptitle('Likelihoods - CDF & Histograms', fontsize=16)
+    plt.suptitle(testSet + ': Likelihoods - CDF & Histograms', fontsize=16)
     for plotIdx, estimationClass in enumerate(classCategories):
         plt.subplot(2, len(classCategories), plotIdx + 1)
         n_bins = 100
@@ -1471,6 +1471,7 @@ def loss_function(beta, mu, logvar, genderProbs, speakerProbs, wordProbs, pitchM
 
     #totalNLL_max = (genderNLL+speakerNLL+wordNLL+pitchNLL).reshape(-1, batchSize).max(dim=0)[0].sum()  # each column has the nDecoders different outputs from the same encoder's output, then max is performed
     totalNLL_max = (genderNLL+speakerNLL+wordNLL).reshape(-1, batchSize).max(dim=0)[0].sum()
+    #totalNLL_max = (wordNLL).reshape(-1, batchSize).max(dim=0)[0].sum()
 
     KLD = -0.5 * torch.sum(1 + logvar - mu.pow(2) - logvar.exp())
 
