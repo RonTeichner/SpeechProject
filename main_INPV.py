@@ -57,8 +57,11 @@ path2SentencesPitchTest = './SentencesPitchTest.pt'
 path2SentencesResultsTest = './SentencesResultsTest.pt'
 path2FigTest = './SentencesFigTest.png'
 
+path2sentencesAudioInputMatrixTrain = './sentencesAudioInputMatrixTrain.pt'
+path2sentencesAudioInputMatrixValidate = './sentencesAudioInputMatrixValidate.pt'
+
 enableWordOnlyClassificationAtEncoderOutput = False
-enableTrain_wrt_groundTruth = True
+enableTrain_wrt_groundTruth = False
 enableSpectrogram = True
 
 nGenders = 2
@@ -68,17 +71,27 @@ fs = 48000  # Hz
 processingDuration = 25e-3  # sec
 nTimeDomainSamplesInSingleFrame = int(processingDuration*fs)
 
-sentencesDatasetsAudioTrain = pickle.load(open(path2SentencesAudioTrain, "rb"))
-sentencesEstimationResultsTrain = pickle.load(open(path2SentencesResultsTrain, "rb"))
 
-sentencesDatasetsAudioValidate = pickle.load(open(path2SentencesAudioValidate, "rb"))
+sentencesEstimationResultsTrain = pickle.load(open(path2SentencesResultsTrain, "rb"))
 sentencesEstimationResultsValidate = pickle.load(open(path2SentencesResultsValidate, "rb"))
 
 # sample from results dataset to obtain the 'deterministic' dataset:
 sentencesEstimationResultsTrain_sampled = sampleFromSmoothing(sentencesEstimationResultsTrain, enableTrain_wrt_groundTruth)
 
 # prepare the encoder input as a matrix by zero-padding the audio samples to have equal lengths:
-sentencesAudioInputMatrixTrain = generateAudioMatrix(sentencesDatasetsAudioTrain, nTimeDomainSamplesInSingleFrame, enableSpectrogram, fs)
+if os.path.isfile(path2sentencesAudioInputMatrixTrain):
+    sentencesAudioInputMatrixTrain = pickle.load(open(path2sentencesAudioInputMatrixTrain, "rb"))
+else:
+    sentencesDatasetsAudioTrain = pickle.load(open(path2SentencesAudioTrain, "rb"))
+    sentencesAudioInputMatrixTrain = generateAudioMatrix(sentencesDatasetsAudioTrain, nTimeDomainSamplesInSingleFrame, enableSpectrogram, fs)
+    pickle.dump(sentencesAudioInputMatrixTrain, open(path2sentencesAudioInputMatrixTrain, "wb"))
+
+if os.path.isfile(path2sentencesAudioInputMatrixValidate):
+    sentencesAudioInputMatrixValidate = pickle.load(open(path2sentencesAudioInputMatrixValidate, "rb"))
+else:
+    sentencesDatasetsAudioValidate = pickle.load(open(path2SentencesAudioValidate, "rb"))
+    sentencesAudioInputMatrixValidate = generateAudioMatrix(sentencesDatasetsAudioValidate, nTimeDomainSamplesInSingleFrame, enableSpectrogram, fs)
+    pickle.dump(sentencesAudioInputMatrixValidate, open(path2sentencesAudioInputMatrixValidate, "wb"))
 
 #model = VAE(measDim=nSamplesIn SingleLSTM_input, lstmHiddenSize=12, lstmNumLayers=1, nDrawsFromSingleEncoderOutput=100, zDim=10).cuda()
 
@@ -87,9 +100,30 @@ if enableSpectrogram:
 else:
     nSamplesInSingleLSTM_input = nTimeDomainSamplesInSingleFrame
 
-beta = 0.1
-model = VAE(measDim=nSamplesInSingleLSTM_input, lstmHiddenSize=12, lstmNumLayers=1, nDrawsFromSingleEncoderOutput=1, zDim=10).cuda()
+beta = 0
+model = VAE(measDim=nSamplesInSingleLSTM_input, lstmHiddenSize=40, lstmNumLayers=1, nDrawsFromSingleEncoderOutput=4, zDim=3).cuda()
 optimizer = optim.Adam(model.parameters(), lr=1e-3)
+# optimizer = optim.SGD(model.parameters(), lr=1e-4, momentum=0)
+
+# model = VAE(measDim=nSamplesInSingleLSTM_input, lstmHiddenSize=40, lstmNumLayers=1, nDrawsFromSingleEncoderOutput=1, zDim=40).cuda()
+# with beta = 0 great results on train set after 2000 epochs. although the time tags are shuffled, bad results on validation set when it is not shuffled and also when it is shuffled
+# so we should decrease the zDim and increase beta.
+# beta = 0.1, zDim = 10:
+
+# starting real mission - training on smoothing, canceling shuffle for start:
+# beta = 1
+# model = VAE(measDim=nSamplesInSingleLSTM_input, lstmHiddenSize=40, lstmNumLayers=1, nDrawsFromSingleEncoderOutput=4, zDim=10).cuda()
+# with beta = 1 the loss is fixed on above 7.
+# try with beta = 0.1 - same result
+# try with beta = 0.01 - after 2000 epochs it is same as smoothing on train set but bad on validation. I give it more time to see if it will generelize better. Maybe switch to SGD?
+
+# same with SGD:
+# after 2000 epochs the loss is above 7. Trying with lr=1e-4 (was 1e-3) - same after 1000. canceling momentum (was 0.9) and seeting beta=0 - loss above 7. it learns nothing witg SGD. why?
+
+# Going back to Adam with lr - 1e-4 and beta = 0.05 - loss is stuck above 7 after 2000 epochs. trying with beta = 0.02. Nothing... try back with lr=1e-3.
+# didn't work. goint back to beta = 0.01 - works but over fits. So maybe decrease zDim to 5 (was 10): still overfits. what about zDim=2 - nothing, loss above 7.
+# zDim = 3 with beta = 0.01 - nothing. zDim = 3 with beta = 0: overfit. It seems to be hard to find the point where there is no overfit.
+
 
 nSentencesForTrain = sentencesEstimationResultsTrain_sampled.shape[0]  # 100
 

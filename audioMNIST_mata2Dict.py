@@ -1534,6 +1534,10 @@ def trainFunc(beta, sentencesAudioInputMatrix, sentencesEstimationResults_sample
         else:
             sentencesAudioInputMatrix = torch.cat((sentencesAudioInputMatrix[-shiftBy:], sentencesAudioInputMatrix[:-shiftBy]), dim=0)
     '''
+    # shuffle all time-tags:
+    if False:  #not validateOnly:
+        timeShuffleIndexes = torch.randperm(sentencesAudioInputMatrix.shape[0])
+        sentencesAudioInputMatrix = sentencesAudioInputMatrix[timeShuffleIndexes]
 
     if validateOnly: probabilitiesLUT = list()
     if enableSimpleClassification: nCorrectPredictions = 0.0
