@@ -79,19 +79,28 @@ sentencesEstimationResultsValidate = pickle.load(open(path2SentencesResultsValid
 sentencesEstimationResultsTrain_sampled = sampleFromSmoothing(sentencesEstimationResultsTrain, enableTrain_wrt_groundTruth)
 
 # prepare the encoder input as a matrix by zero-padding the audio samples to have equal lengths:
-if os.path.isfile(path2sentencesAudioInputMatrixTrain):
-    sentencesAudioInputMatrixTrain = pickle.load(open(path2sentencesAudioInputMatrixTrain, "rb"))
-else:
-    sentencesDatasetsAudioTrain = pickle.load(open(path2SentencesAudioTrain, "rb"))
-    sentencesAudioInputMatrixTrain = generateAudioMatrix(sentencesDatasetsAudioTrain, nTimeDomainSamplesInSingleFrame, enableSpectrogram, fs)
-    pickle.dump(sentencesAudioInputMatrixTrain, open(path2sentencesAudioInputMatrixTrain, "wb"))
-
 if os.path.isfile(path2sentencesAudioInputMatrixValidate):
     sentencesAudioInputMatrixValidate = pickle.load(open(path2sentencesAudioInputMatrixValidate, "rb"))
 else:
     sentencesDatasetsAudioValidate = pickle.load(open(path2SentencesAudioValidate, "rb"))
     sentencesAudioInputMatrixValidate = generateAudioMatrix(sentencesDatasetsAudioValidate, nTimeDomainSamplesInSingleFrame, enableSpectrogram, fs)
     pickle.dump(sentencesAudioInputMatrixValidate, open(path2sentencesAudioInputMatrixValidate, "wb"))
+
+if os.path.isfile(path2sentencesAudioInputMatrixTrain):
+    sentencesAudioInputMatrixTrain = pickle.load(open(path2sentencesAudioInputMatrixTrain, "rb"))
+else:
+    sentencesDatasetsAudioTrain = pickle.load(open(path2SentencesAudioTrain, "rb"))
+    listLen = len(sentencesDatasetsAudioTrain)
+    batchLength = 10000
+    nListBatches = int(np.ceil(listLen/batchLength))
+    for listBatchIdx in range(nListBatches):
+        if listBatchIdx == 0:
+            sentencesAudioInputMatrixTrain = generateAudioMatrix(sentencesDatasetsAudioTrain[listBatchIdx*batchLength:(listBatchIdx+1)*batchLength], nTimeDomainSamplesInSingleFrame, enableSpectrogram, fs)
+        else:
+            sentencesAudioInputMatrixTrain = np.concatenate((sentencesAudioInputMatrixTrain, generateAudioMatrix(sentencesDatasetsAudioTrain[listBatchIdx*batchLength:min((listBatchIdx+1)*batchLength, listLen)], nTimeDomainSamplesInSingleFrame, enableSpectrogram, fs)), axis=1)
+    pickle.dump(sentencesAudioInputMatrixTrain, open(path2sentencesAudioInputMatrixTrain, "wb"), protocol=4)
+
+
 
 #model = VAE(measDim=nSamplesIn SingleLSTM_input, lstmHiddenSize=12, lstmNumLayers=1, nDrawsFromSingleEncoderOutput=100, zDim=10).cuda()
 
@@ -133,7 +142,7 @@ sentencesAudioInputMatrixTrain = torch.tensor(sentencesAudioInputMatrixTrain[:, 
 
 # variables for validation:
 sentencesEstimationResultsValidate_sampled = sampleFromSmoothing(sentencesEstimationResultsValidate, enableTrain_wrt_groundTruth)
-sentencesAudioInputMatrixValidate = torch.tensor(generateAudioMatrix(sentencesDatasetsAudioValidate, nTimeDomainSamplesInSingleFrame, enableSpectrogram, fs), dtype=torch.float32).cuda()
+sentencesAudioInputMatrixValidate = torch.tensor(sentencesAudioInputMatrixValidate, dtype=torch.float32).cuda()
 sentencesEstimationPitchResultsValidate_sampled = torch.tensor(sentencesEstimationResultsValidate_sampled[:, 3:4], dtype=torch.float16).cuda()
 sentencesEstimationResultsValidate_sampled = torch.tensor(sentencesEstimationResultsValidate_sampled[:, :3], dtype=torch.uint8).cuda()
 
