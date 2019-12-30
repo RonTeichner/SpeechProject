@@ -819,6 +819,7 @@ def createSentencesMetadata(metadata, path2SentencesMetadata, nSentences=500, wh
     max_nWordsPerSentence = 8
     listOfLibraryKeys = list(metadata.metaDataDict.keys())
     sentencesMetadata = list()
+    uniqueNumbers = np.zeros(nSentences)
     for sentenceIdx in range(nSentences):
         print('createSentencesMetadata: starting sentence no. %d out of %d' % (sentenceIdx, nSentences))
         sentencesMetadata.append(list())
@@ -854,6 +855,11 @@ def createSentencesMetadata(metadata, path2SentencesMetadata, nSentences=500, wh
                 if foundTest: specificSentence.append((digit, specificDigit[0]))
                 if digitIdx == (sentenceLength-1) and foundTest: sentenceFound=True
                 if forBreakFlag: break
+            uniqueNo = 100 * int(specificSentence[0]) + specificSentence[1][0]
+            if not any(uniqueNo==uniqueNumbers):
+                uniqueNumbers[sentenceIdx] = uniqueNo
+            else:
+                sentenceFound = False
         sentencesMetadata[-1] = specificSentence
     pickle.dump([sentencesMetadata, priorStates, transitionMat], open(path2SentencesMetadata, "wb"))
     return sentencesMetadata, priorStates, transitionMat
@@ -1264,11 +1270,13 @@ def plotPitchHistogramPerSentence(sentencesDatasetsPitch, sentencesEstimationRes
         plt.show()
 
 def createSentencesDataset(metadata, path2SentencesResults, path2SentencesMetadata, path2SentencesFeatures, path2SentencesAudio, path2SentencesPitch, path2WordModels, path2SpeakerModels, path2GenderModels, chosenFeatures, nSentences=10000, whichSet='train'):
+
     if os.path.isfile(path2SentencesResults):
         sentencesEstimationResults = pickle.load(open(path2SentencesResults, "rb"))
         sentencesMetadataTrain, priorStates, transitionMat = pickle.load(open(path2SentencesMetadata, "rb"))
     else:
         # create sentences dataset:
+        print('starting sentence metadata')
         if os.path.isfile(path2SentencesMetadata):
             sentencesMetadata, priorStates, transitionMat = pickle.load(open(path2SentencesMetadata, "rb"))
             # sentencesDatasetsAudio = pickle.load(open(path2SentencesAudio, "rb"))
@@ -1278,12 +1286,14 @@ def createSentencesDataset(metadata, path2SentencesResults, path2SentencesMetada
             sentencesMetadata, priorStates, transitionMat = createSentencesMetadata(metadata, path2SentencesMetadata, nSentences=nSentences, whichSet=whichSet)
 
         # create\load sentences features:
+        print('starting sentence features')
         if os.path.isfile(path2SentencesFeatures):
             sentencesDatasetsFeatures = pickle.load(open(path2SentencesFeatures, "rb"))
         else:
             sentencesDatasetsFeatures = createSentenceWavs_Features(sentencesMetadata, path2SentencesAudio, path2SentencesFeatures)
 
         # create\load sentences pitch:
+        print('starting sentence pitch')
         if os.path.isfile(path2SentencesPitch):
             sentencesDatasetsPitch = pickle.load(open(path2SentencesPitch, "rb"))
             # plotPitchHistogramPerSentence(sentencesDatasetsPitch)
@@ -1294,6 +1304,7 @@ def createSentencesDataset(metadata, path2SentencesResults, path2SentencesMetada
             # The conclusion from plotting the pitch histograms per sentence is to model the sentence speach by a mixture of two Gaussians
 
         # create\load sentences estimation results:
+        print('starting sentence results')
         if os.path.isfile(path2SentencesResults):
             sentencesEstimationResults = pickle.load(open(path2SentencesResults, "rb"))
         else:
@@ -1602,3 +1613,8 @@ def wordVecFromResults(sentencesEstimationResultsTrain):
         wordVec[wordIdx] = singleSentenceProbability['groundTruth']['Digits'][0]
     return wordVec
 
+def findUniqueIndexes(sentencesEstimationResults):
+    uniqueNumbers = np.zeros(len(sentencesEstimationResults))
+    for sentenceIdx, sentence in enumerate(sentencesEstimationResults):
+        speakerNo, gender, digit = int(sentence['groundTruth']['SpeakerNo']),  int(sentence['groundTruth']['SpeakerGender'] == 'male'), sentence['groundTruth']['Digits'][0]
+        uniqueNumbers[sentenceIdx] = 100*speakerNo + 10*gender + digit
