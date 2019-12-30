@@ -855,7 +855,7 @@ def createSentencesMetadata(metadata, path2SentencesMetadata, nSentences=500, wh
                 if foundTest: specificSentence.append((digit, specificDigit[0]))
                 if digitIdx == (sentenceLength-1) and foundTest: sentenceFound=True
                 if forBreakFlag: break
-            uniqueNo = 100 * int(specificSentence[0]) + specificSentence[1][0]
+            uniqueNo = 1000 * int(specificSentence[0]) + 100*specificSentence[1][0] + int(specificSentence[1][1].split('.wav')[0].split('_')[-1])
             if not any(uniqueNo==uniqueNumbers):
                 uniqueNumbers[sentenceIdx] = uniqueNo
             else:
@@ -1613,8 +1613,19 @@ def wordVecFromResults(sentencesEstimationResultsTrain):
         wordVec[wordIdx] = singleSentenceProbability['groundTruth']['Digits'][0]
     return wordVec
 
-def findUniqueIndexes(sentencesEstimationResults):
-    uniqueNumbers = np.zeros(len(sentencesEstimationResults))
-    for sentenceIdx, sentence in enumerate(sentencesEstimationResults):
-        speakerNo, gender, digit = int(sentence['groundTruth']['SpeakerNo']),  int(sentence['groundTruth']['SpeakerGender'] == 'male'), sentence['groundTruth']['Digits'][0]
-        uniqueNumbers[sentenceIdx] = 100*speakerNo + 10*gender + digit
+def findUniqueIndexes(path2SentencesMetadata):
+    metadata = pickle.load(open(path2SentencesMetadata, "rb"))[0]
+    uniqueNumbers = np.zeros(len(metadata))
+    for sentenceIdx, sentence in enumerate(metadata):
+        speakerNo, digit, wavNo = int(sentence[0]), sentence[1][0], int(sentence[1][1].split('.wav')[0].split('_')[-1])
+        uniqueNumbers[sentenceIdx] = 1000*speakerNo + wavNo + 100*digit
+    unique_numbers, unique_indices = np.unique(uniqueNumbers, return_index=True)
+    return unique_indices
+
+def numberOfTrainWords(metadata):
+    nTrainWords = 0
+    for libraryKey in metadata.metaDataDict.keys():
+        for digitKey in metadata.metaDataDict[libraryKey]['pathsDict'].keys():
+            for path in metadata.metaDataDict[libraryKey]['pathsDict'][digitKey]:
+                nTrainWords += path[1] == metadata.trainEnum
+    return nTrainWords

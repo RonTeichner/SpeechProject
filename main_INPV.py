@@ -77,6 +77,8 @@ sentencesEstimationResultsTrain = pickle.load(open(path2SentencesResultsTrain, "
 sentencesEstimationResultsValidate = pickle.load(open(path2SentencesResultsValidate, "rb"))
 sentencesEstimationResultsTest = pickle.load(open(path2SentencesResultsTest, "rb"))
 
+findUniqueIndexes(path2SentencesMetadataTrain)
+
 # prepare the encoder input as a matrix by zero-padding the audio samples to have equal lengths:
 if os.path.isfile(path2sentencesAudioInputMatrixValidate):
     sentencesAudioInputMatrixValidate = pickle.load(open(path2sentencesAudioInputMatrixValidate, "rb"))
