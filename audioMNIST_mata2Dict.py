@@ -1336,11 +1336,8 @@ def sampleFromSmoothing(sentencesEstimationResults, enableSimpleClassification=F
         sentencesEstimationResults_sampled[sentenceIdx] = np.array([sampledGender, sampledSpeaker, sampledWord, sampledPitch])
     return sentencesEstimationResults_sampled
 
-def generateAudioMatrix(sentencesDatasetsAudio, nSamplesInSingleLSTM_input, enableSpectrogram, fs):
-    maxSentenceLengh = 0
+def generateAudioMatrix(sentencesDatasetsAudio, nSamplesInSingleLSTM_input, enableSpectrogram, fs, maxSentenceLengh):
     nSentences = len(sentencesDatasetsAudio)
-    for sentenceIdx, sentence in enumerate(sentencesDatasetsAudio):
-        if len(sentence[1][1]) > maxSentenceLengh: maxSentenceLengh = len(sentence[1][1])
     sentenceAudioMat = np.zeros((len(sentencesDatasetsAudio), maxSentenceLengh))
     for sentenceIdx, sentence in enumerate(sentencesDatasetsAudio):
         wav = sentence[1][1]

@@ -61,15 +61,17 @@ path2sentencesAudioInputMatrixTrain = './sentencesAudioInputMatrixTrain.pt'
 path2sentencesAudioInputMatrixValidate = './sentencesAudioInputMatrixValidate.pt'
 path2sentencesAudioInputMatrixTest = './sentencesAudioInputMatrixTest.pt'
 
+path2MaxSentence = './maxSentence.pt'
+
 enableWordOnlyClassificationAtEncoderOutput = False
-enableTrain_wrt_groundTruth = False
+enableTrain_wrt_groundTruth = True
 enableSpectrogram = True
 
 nGenders = 2
 femaleIdx, maleIdx = np.arange(nGenders)
 
 fs = 48000  # Hz
-processingDuration = 25e-3  # sec
+processingDuration = 4000e-3  # sec
 nTimeDomainSamplesInSingleFrame = int(processingDuration*fs)
 
 
@@ -77,27 +79,43 @@ sentencesEstimationResultsTrain = pickle.load(open(path2SentencesResultsTrain, "
 sentencesEstimationResultsValidate = pickle.load(open(path2SentencesResultsValidate, "rb"))
 sentencesEstimationResultsTest = pickle.load(open(path2SentencesResultsTest, "rb"))
 
-findUniqueIndexes(path2SentencesMetadataTrain)
+#findUniqueIndexes(path2SentencesMetadataTrain)
+if os.path.isfile(path2MaxSentence):
+    maxSentenceLengh = pickle.load(open(path2MaxSentence, "rb"))
+else:
+    sentencesDatasetsAudioTest = pickle.load(open(path2SentencesAudioTest, "rb"))
+    sentencesDatasetsAudioValidate = pickle.load(open(path2SentencesAudioValidate, "rb"))
+    sentencesDatasetsAudioTrain = pickle.load(open(path2SentencesAudioTrain, "rb"))
+    maxSentenceLengh = 0
+    for sentenceIdx, sentence in enumerate(sentencesDatasetsAudioValidate):
+        if len(sentence[1][1]) > maxSentenceLengh: maxSentenceLengh = len(sentence[1][1])
+    for sentenceIdx, sentence in enumerate(sentencesDatasetsAudioTest):
+        if len(sentence[1][1]) > maxSentenceLengh: maxSentenceLengh = len(sentence[1][1])
+    for sentenceIdx, sentence in enumerate(sentencesDatasetsAudioTrain):
+        if len(sentence[1][1]) > maxSentenceLengh: maxSentenceLengh = len(sentence[1][1])
+    pickle.dump(maxSentenceLengh, open(path2MaxSentence, "wb"))
 
 # prepare the encoder input as a matrix by zero-padding the audio samples to have equal lengths:
 if os.path.isfile(path2sentencesAudioInputMatrixValidate):
     sentencesAudioInputMatrixValidate = pickle.load(open(path2sentencesAudioInputMatrixValidate, "rb"))
 else:
     sentencesDatasetsAudioValidate = pickle.load(open(path2SentencesAudioValidate, "rb"))
-    sentencesAudioInputMatrixValidate = generateAudioMatrix(sentencesDatasetsAudioValidate, nTimeDomainSamplesInSingleFrame, enableSpectrogram, fs)
+    sentencesAudioInputMatrixValidate = generateAudioMatrix(sentencesDatasetsAudioValidate, nTimeDomainSamplesInSingleFrame, enableSpectrogram, fs, maxSentenceLengh)
     pickle.dump(sentencesAudioInputMatrixValidate, open(path2sentencesAudioInputMatrixValidate, "wb"))
 
 if os.path.isfile(path2sentencesAudioInputMatrixTest):
     sentencesAudioInputMatrixTest = pickle.load(open(path2sentencesAudioInputMatrixTest, "rb"))
 else:
     sentencesDatasetsAudioTest = pickle.load(open(path2SentencesAudioTest, "rb"))
-    sentencesAudioInputMatrixTest = generateAudioMatrix(sentencesDatasetsAudioTest, nTimeDomainSamplesInSingleFrame, enableSpectrogram, fs)
+    sentencesAudioInputMatrixTest = generateAudioMatrix(sentencesDatasetsAudioTest, nTimeDomainSamplesInSingleFrame, enableSpectrogram, fs, maxSentenceLengh)
     pickle.dump(sentencesAudioInputMatrixTest, open(path2sentencesAudioInputMatrixTest, "wb"))
 
 if os.path.isfile(path2sentencesAudioInputMatrixTrain):
     sentencesAudioInputMatrixTrain = pickle.load(open(path2sentencesAudioInputMatrixTrain, "rb"))
 else:
     sentencesDatasetsAudioTrain = pickle.load(open(path2SentencesAudioTrain, "rb"))
+    sentencesAudioInputMatrixTrain = generateAudioMatrix(sentencesDatasetsAudioTrain, nTimeDomainSamplesInSingleFrame, enableSpectrogram, fs, maxSentenceLengh)
+    '''
     listLen = len(sentencesDatasetsAudioTrain)
     batchLength = 10000
     nListBatches = int(np.ceil(listLen/batchLength))
@@ -106,6 +124,7 @@ else:
             sentencesAudioInputMatrixTrain = generateAudioMatrix(sentencesDatasetsAudioTrain[listBatchIdx*batchLength:(listBatchIdx+1)*batchLength], nTimeDomainSamplesInSingleFrame, enableSpectrogram, fs)
         else:
             sentencesAudioInputMatrixTrain = np.concatenate((sentencesAudioInputMatrixTrain, generateAudioMatrix(sentencesDatasetsAudioTrain[listBatchIdx*batchLength:min((listBatchIdx+1)*batchLength, listLen)], nTimeDomainSamplesInSingleFrame, enableSpectrogram, fs)), axis=1)
+    '''
     pickle.dump(sentencesAudioInputMatrixTrain, open(path2sentencesAudioInputMatrixTrain, "wb"), protocol=4)
 
 
@@ -118,7 +137,7 @@ else:
     nSamplesInSingleLSTM_input = nTimeDomainSamplesInSingleFrame
 
 beta = 0.01 #0.0025  # [0.005, 0.001]
-model = VAE(measDim=nSamplesInSingleLSTM_input, lstmHiddenSize=80, lstmNumLayers=1, nDrawsFromSingleEncoderOutput=4, zDim=50).cuda()
+model = VAE(measDim=nSamplesInSingleLSTM_input, lstmHiddenSize=12, lstmNumLayers=1, nDrawsFromSingleEncoderOutput=1, zDim=12).cuda()
 optimizer = optim.Adam(model.parameters(), lr=1e-3)
 # optimizer = optim.SGD(model.parameters(), lr=1e-4, momentum=0)
 
