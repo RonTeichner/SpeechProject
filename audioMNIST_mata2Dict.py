@@ -855,11 +855,12 @@ def createSentencesMetadata(metadata, path2SentencesMetadata, nSentences=500, wh
                 if foundTest: specificSentence.append((digit, specificDigit[0]))
                 if digitIdx == (sentenceLength-1) and foundTest: sentenceFound=True
                 if forBreakFlag: break
-            uniqueNo = 1000 * int(specificSentence[0]) + 100*specificSentence[1][0] + int(specificSentence[1][1].split('.wav')[0].split('_')[-1])
-            if not any(uniqueNo==uniqueNumbers):
-                uniqueNumbers[sentenceIdx] = uniqueNo
-            else:
-                sentenceFound = False
+            if sentenceFound:
+                uniqueNo = 1000 * int(specificSentence[0]) + 100*specificSentence[1][0] + int(specificSentence[1][1].split('.wav')[0].split('_')[-1])
+                if not any(uniqueNo == uniqueNumbers):
+                    uniqueNumbers[sentenceIdx] = uniqueNo
+                else:
+                    sentenceFound = False
         sentencesMetadata[-1] = specificSentence
     pickle.dump([sentencesMetadata, priorStates, transitionMat], open(path2SentencesMetadata, "wb"))
     return sentencesMetadata, priorStates, transitionMat
