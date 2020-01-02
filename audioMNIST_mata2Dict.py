@@ -18,11 +18,12 @@ from sklearn.mixture import GaussianMixture
 from sklearn.cluster import KMeans
 from sklearn.metrics import pairwise_distances_argmin_min
 from sklearn.preprocessing import StandardScaler
+from sklearn.preprocessing import MinMaxScaler
+from scipy import stats
 from pysndfx import AudioEffectsChain
 from copy import deepcopy
 import amfm_decompy.pYAAPT as pYAAPT
 import amfm_decompy.basic_tools as basic
-import scipy.stats as stats
 
 def createAudioMNIST_metadataDict():
     path2AudioMNIST = '../AudioMNIST/data/'
@@ -1341,25 +1342,59 @@ def generateAudioMatrix(sentencesDatasetsAudio, nSamplesInSingleLSTM_input, enab
     sentenceAudioMat = np.zeros((len(sentencesDatasetsAudio), maxSentenceLengh))
     for sentenceIdx, sentence in enumerate(sentencesDatasetsAudio):
         wav = sentence[1][1]
-        zeroPaddedWav = np.concatenate((np.zeros(maxSentenceLengh - len(wav)), wav))
+        if wav.shape[0] < maxSentenceLengh:
+            zeroPaddedWav = np.concatenate((np.zeros(maxSentenceLengh - len(wav)), wav))
+        else:
+            zeroPaddedWav = wav[-maxSentenceLengh:]
         sentenceAudioMat[sentenceIdx] = zeroPaddedWav
     sentenceAudioMat = np.expand_dims(sentenceAudioMat.transpose(), axis=2)  # [time, sentenceIdx, feature]
+    # plt.plot(sentenceAudioMat[:,0,0])
+    scaler = MinMaxScaler(feature_range=(-1, 1))
+    sentenceAudioMat = np.expand_dims(scaler.fit_transform(sentenceAudioMat[:, :, 0]), axis=2)
+    # plt.plot(sentenceAudioMat[:, 0, 0])
     if enableSpectrogram:
         f, t, Sxx = signal.spectrogram(x=sentenceAudioMat, fs=fs, nperseg=nSamplesInSingleLSTM_input, return_onesided=True, axis=0)
+        '''
+        listLen = sentenceAudioMat.shape[1]
+        batchLength = 2000
+        nListBatches = int(np.ceil(listLen / batchLength))
+        for listBatchIdx in range(nListBatches):
+            f, PxxSingleBatch  = signal.welch(x=sentenceAudioMat[:, listBatchIdx*batchLength:(listBatchIdx+1)*batchLength], fs=fs, window='hann', nperseg=256,  nfft=256, axis=0)
+            if listBatchIdx == 0:
+                Pxx = PxxSingleBatch
+            else:
+                Pxx = np.concatenate((Pxx, PxxSingleBatch), axis=1)
+        t = np.zeros(1)
+        Sxx = np.expand_dims(Pxx, axis=2)
+        '''
+
         # plt.pcolormesh(t, f, Sxx[:,0,0,:])
         # remove frequencies above fs/5:
-        fsFactor = 5
+        fsFactor = 8
         SxxFreqCropped = Sxx[np.where(f < fs / fsFactor)[0]]
+        fCropped = f[np.where(f < fs / fsFactor)[0]]
+        # plt.pcolormesh(t, fCropped, SxxFreqCropped[:, 0, 0, :])
         # scale:
-        scaler = StandardScaler()
-        '''
-        Sxx2 = Sxx.transpose(1, 3, 0, 2).squeeze(axis=-1)  # [sample, time, feature]
-        Sxx3 = Sxx2.reshape(nSentences, -1)  # [sample, time*feature]                
-        Sxx3_scaled = scaler.fit_transform(Sxx3)
-        Sxx4 = Sxx3.reshape(nSentences, t.shape[0], f.shape[0])  # [sample, time, feature]        
-        sentenceAudioMat = Sxx4.transpose(1, 0, 2)
-        '''
-        sentenceAudioMat = scaler.fit_transform(SxxFreqCropped.transpose(1, 3, 0, 2).squeeze(axis=-1).reshape(nSentences, -1)).reshape(nSentences, t.shape[0], np.where(f < fs / fsFactor)[0].shape[0]).transpose(1, 0, 2)
+        SxxScaled = np.zeros_like(SxxFreqCropped)
+        for sentenceIdx in range(nSentences):
+            print('starting scaling sentence %d out of %d' % (sentenceIdx, nSentences))
+            x = SxxFreqCropped[:, sentenceIdx, 0, :].reshape(-1)
+            xt, _ = stats.boxcox(x + 1e-30)
+            SxxScaled[:, sentenceIdx:sentenceIdx+1, 0:1, :] = xt.reshape(SxxFreqCropped[:, sentenceIdx:sentenceIdx+1, 0:1, :].shape)
+            '''
+            fig = plt.figure()
+            ax1 = fig.add_subplot(211)
+            prob = stats.probplot(x, dist=stats.norm, plot=ax1)
+            ax1.set_xlabel('')
+            ax1.set_title('Probplot against normal distribution')
+            ax2 = fig.add_subplot(212)
+            prob = stats.probplot(xt, dist=stats.norm, plot=ax2)
+            ax2.set_title('Probplot after Box-Cox transformation')
+            plt.show()
+            '''
+        sentenceAudioMat = SxxScaled.transpose(3, 1, 0, 2)[:, :, :, 0]
+
+        #sentenceAudioMat = scaler.fit_transform(SxxFreqCropped.transpose(1, 3, 0, 2).squeeze(axis=-1).reshape(nSentences, -1)).reshape(nSentences, t.shape[0], np.where(f < fs / fsFactor)[0].shape[0]).transpose(1, 0, 2)
         '''
         plt.subplot(1,2,1)
         plt.pcolormesh(t, f, Sxx[:, 0, 0, :], norm=mpl.colors.Normalize(vmin=-1., vmax=1.))
@@ -1370,7 +1405,7 @@ def generateAudioMatrix(sentencesDatasetsAudio, nSamplesInSingleLSTM_input, enab
     return sentenceAudioMat
 
 class VAE(nn.Module):
-    def __init__(self, measDim, lstmHiddenSize, lstmNumLayers, nDrawsFromSingleEncoderOutput, zDim):
+    def __init__(self, measDim, useLSTM, lstmHiddenSize, lstmNumLayers, nDrawsFromSingleEncoderOutput, zDim):
         super(VAE, self).__init__()
 
         self.nDrawsFromSingleEncoderOutput = nDrawsFromSingleEncoderOutput
@@ -1381,11 +1416,43 @@ class VAE(nn.Module):
         self.speakerMultivariate = 60
         self.wordMultivariate = 10
         self.nContinuesParameters = 1 # pitch
+        self.useLSTM = useLSTM
 
         # encoder:
         self.kalmanLSTM = nn.LSTM(input_size=measDim, hidden_size=lstmHiddenSize, num_layers=lstmNumLayers)
         self.fc21 = nn.Linear(lstmHiddenSize, self.zDim)
         self.fc22 = nn.Linear(lstmHiddenSize, self.zDim)
+        '''
+        self.con1 = nn.Conv1d(1, 64, 160, 4, 2) # shape[2] is floor((y.shape[2]-(kernel_size-stride))/stride)
+        self.con2 = nn.Conv1d(64, 128, 160, 4, 2)
+        self.con3 = nn.Conv1d(128, 256, 160, 4, 2)
+        self.con4 = nn.Conv1d(256, 512, 160, 4, 2)
+        self.con5 = nn.Conv1d(512, 512, 109, 4, 2)
+        '''
+        self.main = nn.Sequential(
+            nn.Conv1d(1, 64, 160, 4, 2),
+            nn.BatchNorm1d(64),
+            nn.LeakyReLU(0.2, inplace=True),
+            nn.Conv1d(64, 128, 160, 4, 2),
+            nn.BatchNorm1d(128),
+            nn.LeakyReLU(0.2, inplace=True),
+            nn.Conv1d(128, 256, 160, 4, 2),
+            nn.BatchNorm1d(256),
+            nn.LeakyReLU(0.2, inplace=True),
+            nn.Conv1d(256, 512, 160, 4, 2),
+            nn.BatchNorm1d(512),
+            nn.LeakyReLU(0.2, inplace=True),
+            nn.Conv1d(512, 512, 109, 4, 2),
+            nn.BatchNorm1d(512),
+            nn.LeakyReLU(0.2, inplace=True),
+        )
+
+        self.linearMeanFnn = nn.Linear(512, zDim)
+        self.linearCovFnn = nn.Linear(512, zDim)
+
+        self.linearMeas = nn.Linear(measDim, measDim)
+        self.linearMean = nn.Linear(measDim, zDim)
+        self.linearCov = nn.Linear(measDim, zDim)
 
         self.dropout = nn.Dropout(p=0.2)
 
@@ -1394,10 +1461,13 @@ class VAE(nn.Module):
         self.fc4 = nn.Linear(self.decoderInnerWidth, self.decoderInnerWidth)
         self.fc5 = nn.Linear(self.decoderInnerWidth, self.genderMultivariate + self.speakerMultivariate + self.wordMultivariate + 2*self.nContinuesParameters)
 
+        self.fc6 = nn.Linear(self.zDim, self.genderMultivariate + self.speakerMultivariate + self.wordMultivariate + 2*self.nContinuesParameters)
+
         # general:
         self.logSoftMax = nn.LogSoftmax(dim=1)
         self.LeakyReLU = nn.LeakyReLU()
         self.tanh = nn.Tanh()
+        self.sigmoid = nn.Sigmoid()
 
 
     def encode(self, y):
@@ -1405,21 +1475,31 @@ class VAE(nn.Module):
         postDropout = self.dropout(hn[0])
         return self.fc21(postDropout), self.fc22(postDropout)
 
+    def fnnEncoder(self, y):
+        mid = self.main(y)
+        return self.linearMeanFnn(mid[:, :, 0]), self.linearCovFnn(mid[:, :, 0])
+
     def reparameterize(self, mu, logvar):
         std = torch.exp(0.5*logvar)
         eps = torch.randn_like(std)
         return mu + eps*std
 
     def decode(self, z):
-        h3 = self.LeakyReLU(self.fc3(z))
-        h4 = self.tanh(self.fc4(h3))
-        #return self.logSoftMax(self.fc5(h3)) # h3 here performed good without p(z) constrain
-        #return torch.sigmoid(self.fc5(h3))  # h3 here performed good without p(z) constrain
-        h5 = self.fc5(h4)
+        #h3 = self.LeakyReLU(self.fc3(z))
+        #h4 = self.LeakyReLU(self.fc4(h3))
+        #h5 = self.fc5(h4)
+
+        h5 = self.sigmoid(self.fc6(z))
         return h5 # h3 here performed good without p(z) constrain
 
     def forward(self, y):
-        mu, logvar = self.encode(y)
+        '''
+        if self.useLSTM:
+            mu, logvar = self.encode(y)
+        else:
+            mu, logvar = self.fnnEncoder(y)
+        '''
+        mu, logvar = self.fnnEncoder(y.permute(1, 2, 0))
         z = self.reparameterize(mu.repeat(self.nDrawsFromSingleEncoderOutput, 1), logvar.repeat(self.nDrawsFromSingleEncoderOutput, 1))
         decoderOut = self.decode(z)
         genderProbs, speakerProbs, wordProbs, pitchMean, pitchLogVar = decoderOut[:, :self.genderMultivariate], decoderOut[:, self.genderMultivariate:self.genderMultivariate+self.speakerMultivariate], decoderOut[:, self.genderMultivariate+self.speakerMultivariate : self.genderMultivariate+self.speakerMultivariate+self.wordMultivariate], decoderOut[:, self.genderMultivariate+self.speakerMultivariate+self.wordMultivariate : self.genderMultivariate+self.speakerMultivariate+self.wordMultivariate+1], decoderOut[:, self.genderMultivariate+self.speakerMultivariate+self.wordMultivariate+1 : self.genderMultivariate+self.speakerMultivariate+self.wordMultivariate+2]
@@ -1535,7 +1615,7 @@ def trainFunc(beta, sentencesAudioInputMatrix, sentencesEstimationResults_sample
     inputSentenceIndexes = torch.randperm(nSentences)
     sentencesAudioInputMatrix, sentencesEstimationResults_sampled, sentencesEstimationPitchResults_sampled = sentencesAudioInputMatrix[:, inputSentenceIndexes], sentencesEstimationResults_sampled[inputSentenceIndexes], sentencesEstimationPitchResults_sampled[inputSentenceIndexes]
 
-    '''
+
     # time shift for augmenting the data:
     if not validateOnly:
         shiftBy = torch.randint(0, int(sentencesAudioInputMatrix.shape[0] / 4), (1,))
@@ -1543,7 +1623,7 @@ def trainFunc(beta, sentencesAudioInputMatrix, sentencesEstimationResults_sample
             sentencesAudioInputMatrix = torch.cat((sentencesAudioInputMatrix[shiftBy:], sentencesAudioInputMatrix[:shiftBy]), dim=0)
         else:
             sentencesAudioInputMatrix = torch.cat((sentencesAudioInputMatrix[-shiftBy:], sentencesAudioInputMatrix[:-shiftBy]), dim=0)
-    '''
+
     # shuffle all time-tags:
     if False:  #not validateOnly:
         timeShuffleIndexes = torch.randperm(sentencesAudioInputMatrix.shape[0])
@@ -1553,13 +1633,14 @@ def trainFunc(beta, sentencesAudioInputMatrix, sentencesEstimationResults_sample
     if enableSimpleClassification: nCorrectPredictions = 0.0
     for batchIdx in range(nBatches):
         if batchIdx == 0: print('epoch %d: starting batch %d out of %d' % (epoch, batchIdx, nBatches))
-        data = sentencesAudioInputMatrix[:, batchIdx * batchSize:(batchIdx + 1) * batchSize].float()
+        data = sentencesAudioInputMatrix[:, batchIdx * batchSize:(batchIdx + 1) * batchSize].float().cuda()
+        '''
         # crop beginning to have integer size of model.measDim and then reshape to have model.measDim features:
         if not enableSpectrogram:
             nSamples2Crop = data.shape[0] - int(data.shape[0] / model.measDim) * model.measDim
             data = (data[nSamples2Crop:]).transpose(1, 2).reshape(-1, model.measDim, data.shape[1]).transpose(1, 2)
-
-        labels, pitchLabels = sentencesEstimationResults_sampled[batchIdx * batchSize:(batchIdx + 1) * batchSize].long(), sentencesEstimationPitchResults_sampled[batchIdx * batchSize:(batchIdx + 1) * batchSize].float()
+        '''
+        labels, pitchLabels = sentencesEstimationResults_sampled[batchIdx * batchSize:(batchIdx + 1) * batchSize].long().cuda(), sentencesEstimationPitchResults_sampled[batchIdx * batchSize:(batchIdx + 1) * batchSize].float().cuda()
         sampledGender, sampledSpeaker, sampledWord, sampledPitch = labels[:, 0], labels[:, 1], labels[:, 2], pitchLabels[:, 0]
 
         if not validateOnly: optimizer.zero_grad()
