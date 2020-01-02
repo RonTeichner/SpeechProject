@@ -1339,14 +1339,14 @@ def sampleFromSmoothing(sentencesEstimationResults, enableSimpleClassification=F
 
 def generateAudioMatrix(sentencesDatasetsAudio, nSamplesInSingleLSTM_input, enableSpectrogram, fs, maxSentenceLengh):
     nSentences = len(sentencesDatasetsAudio)
-    sentenceAudioMat = np.zeros((len(sentencesDatasetsAudio), maxSentenceLengh))
+    sentenceAudioMat = np.zeros((len(sentencesDatasetsAudio), int(maxSentenceLengh/3)))
     for sentenceIdx, sentence in enumerate(sentencesDatasetsAudio):
         wav = sentence[1][1]
         if wav.shape[0] < maxSentenceLengh:
             zeroPaddedWav = np.concatenate((np.zeros(maxSentenceLengh - len(wav)), wav))
         else:
             zeroPaddedWav = wav[-maxSentenceLengh:]
-        sentenceAudioMat[sentenceIdx] = zeroPaddedWav
+        sentenceAudioMat[sentenceIdx] = zeroPaddedWav[::3]
     sentenceAudioMat = np.expand_dims(sentenceAudioMat.transpose(), axis=2)  # [time, sentenceIdx, feature]
     # plt.plot(sentenceAudioMat[:,0,0])
     scaler = MinMaxScaler(feature_range=(-1, 1))
@@ -1430,19 +1430,19 @@ class VAE(nn.Module):
         self.con5 = nn.Conv1d(512, 512, 109, 4, 2)
         '''
         self.main = nn.Sequential(
-            nn.Conv1d(1, 64, 160, 4, 2),
+            nn.Conv1d(1, 64, 80, 4, 2),
             nn.BatchNorm1d(64),
             nn.LeakyReLU(0.2, inplace=True),
-            nn.Conv1d(64, 128, 160, 4, 2),
+            nn.Conv1d(64, 128, 80, 4, 2),
             nn.BatchNorm1d(128),
             nn.LeakyReLU(0.2, inplace=True),
-            nn.Conv1d(128, 256, 160, 4, 2),
+            nn.Conv1d(128, 256, 80, 4, 2),
             nn.BatchNorm1d(256),
             nn.LeakyReLU(0.2, inplace=True),
-            nn.Conv1d(256, 512, 160, 4, 2),
+            nn.Conv1d(256, 512, 80, 4, 2),
             nn.BatchNorm1d(512),
             nn.LeakyReLU(0.2, inplace=True),
-            nn.Conv1d(512, 512, 109, 4, 2),
+            nn.Conv1d(512, 512, 40, 4, 2),
             nn.BatchNorm1d(512),
             nn.LeakyReLU(0.2, inplace=True),
         )
@@ -1633,14 +1633,15 @@ def trainFunc(beta, sentencesAudioInputMatrix, sentencesEstimationResults_sample
     if enableSimpleClassification: nCorrectPredictions = 0.0
     for batchIdx in range(nBatches):
         if batchIdx == 0: print('epoch %d: starting batch %d out of %d' % (epoch, batchIdx, nBatches))
-        data = sentencesAudioInputMatrix[:, batchIdx * batchSize:(batchIdx + 1) * batchSize].float().cuda()
+        data = sentencesAudioInputMatrix[:, batchIdx * batchSize:(batchIdx + 1) * batchSize].float()#.cuda()
         '''
         # crop beginning to have integer size of model.measDim and then reshape to have model.measDim features:
         if not enableSpectrogram:
             nSamples2Crop = data.shape[0] - int(data.shape[0] / model.measDim) * model.measDim
             data = (data[nSamples2Crop:]).transpose(1, 2).reshape(-1, model.measDim, data.shape[1]).transpose(1, 2)
         '''
-        labels, pitchLabels = sentencesEstimationResults_sampled[batchIdx * batchSize:(batchIdx + 1) * batchSize].long().cuda(), sentencesEstimationPitchResults_sampled[batchIdx * batchSize:(batchIdx + 1) * batchSize].float().cuda()
+        labels = sentencesEstimationResults_sampled[batchIdx * batchSize:(batchIdx + 1) * batchSize].long()#.cuda()
+        pitchLabels = sentencesEstimationPitchResults_sampled[batchIdx * batchSize:(batchIdx + 1) * batchSize].float()#.cuda()
         sampledGender, sampledSpeaker, sampledWord, sampledPitch = labels[:, 0], labels[:, 1], labels[:, 2], pitchLabels[:, 0]
 
         if not validateOnly: optimizer.zero_grad()
