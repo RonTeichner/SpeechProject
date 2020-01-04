@@ -1508,8 +1508,8 @@ def loss_function(beta, mu, logvar, genderProbs, speakerProbs, wordProbs, pitchM
     '''
 
     #totalNLL_max = (genderNLL+speakerNLL+wordNLL+pitchNLL).reshape(-1, batchSize).max(dim=0)[0].sum()  # each column has the nDecoders different outputs from the same encoder's output, then max is performed
-    #totalNLL_max = (genderNLL+speakerNLL+wordNLL).reshape(-1, batchSize).max(dim=0)[0].sum()
-    totalNLL_max = (wordNLL).reshape(-1, batchSize).max(dim=0)[0].sum()
+    totalNLL_max = (genderNLL+speakerNLL+wordNLL).reshape(-1, batchSize).max(dim=0)[0].sum()
+    #totalNLL_max = (wordNLL).reshape(-1, batchSize).max(dim=0)[0].sum()
     #totalNLL_max = (genderNLL).reshape(-1, batchSize).max(dim=0)[0].sum()
 
     KLD = -0.5 * torch.sum(1 + logvar - mu.pow(2) - logvar.exp())
