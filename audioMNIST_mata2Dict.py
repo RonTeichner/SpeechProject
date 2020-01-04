@@ -1618,7 +1618,7 @@ def trainFunc(t_transforms, v_transforms, beta, sentencesAudioInputMatrix, sente
 
         if not validateOnly: optimizer.zero_grad()
         genderProbs, speakerProbs, wordProbs, pitchMean, pitchLogVar, mu, logvar, z = model(data)
-        wordProbs = mu[:, :10]
+        #wordProbs = mu[:, :10]
         # t = time.time()
 
         if False:
