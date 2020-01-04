@@ -1470,7 +1470,7 @@ def loss_function_classification_prob(wordProbs, sampledWord):
     nDecoders = 1
     batchSize = sampledWord.numel()
     sampledWord = sampledWord.unsqueeze(1).repeat(nDecoders, 1).reshape(-1)
-    wordNLL = F.cross_entropy(wordProbs, sampledWord, reduction='none')
+    wordNLL = F.cross_entropy(wordProbs[:, :10], sampledWord, reduction='none')
     nCorrectPredictions = (F.softmax(wordProbs, dim=1).argmax(dim=1) == sampledWord).sum()
     return wordNLL.reshape(-1, batchSize).sum(), nCorrectPredictions
 
@@ -1508,8 +1508,9 @@ def loss_function(beta, mu, logvar, genderProbs, speakerProbs, wordProbs, pitchM
     '''
 
     #totalNLL_max = (genderNLL+speakerNLL+wordNLL+pitchNLL).reshape(-1, batchSize).max(dim=0)[0].sum()  # each column has the nDecoders different outputs from the same encoder's output, then max is performed
-    totalNLL_max = (genderNLL+speakerNLL+wordNLL).reshape(-1, batchSize).max(dim=0)[0].sum()
-    #totalNLL_max = (wordNLL).reshape(-1, batchSize).max(dim=0)[0].sum()
+    #totalNLL_max = (genderNLL+speakerNLL+wordNLL).reshape(-1, batchSize).max(dim=0)[0].sum()
+    totalNLL_max = (wordNLL).reshape(-1, batchSize).max(dim=0)[0].sum()
+    #totalNLL_max = (genderNLL).reshape(-1, batchSize).max(dim=0)[0].sum()
 
     KLD = -0.5 * torch.sum(1 + logvar - mu.pow(2) - logvar.exp())
 
@@ -1548,7 +1549,7 @@ def getProbabilitiesLUT(genderProbs, speakerProbs, wordProbs, pitchMean, pitchLo
         probabilitiesLUT.append([clustersWeights, clustersRepresentatives])
     return probabilitiesLUT
 
-def trainFunc(t_transforms, beta, sentencesAudioInputMatrix, sentencesEstimationResults_sampled, sentencesEstimationPitchResults_sampled, model, optimizer, lr_scheduler, epoch, validateOnly=False, enableSpectrogram=False, enableSimpleClassification=False):
+def trainFunc(t_transforms, v_transforms, beta, sentencesAudioInputMatrix, sentencesEstimationResults_sampled, sentencesEstimationPitchResults_sampled, model, optimizer, lr_scheduler, epoch, validateOnly=False, enableSpectrogram=False, enableSimpleClassification=False):
     if validateOnly:
         model.eval()
     else:
@@ -1556,8 +1557,8 @@ def trainFunc(t_transforms, beta, sentencesAudioInputMatrix, sentencesEstimation
 
     total_loss = 0
     fs = 48000
-    fakeLabel = 0 # for compatability
-    batchSize = 24
+
+    batchSize = 100
     nSentences = len(sentencesAudioInputMatrix)
     nBatches = int(np.ceil(nSentences/batchSize))
     nDecoders = model.nDrawsFromSingleEncoderOutput
@@ -1579,37 +1580,50 @@ def trainFunc(t_transforms, beta, sentencesAudioInputMatrix, sentencesEstimation
             nSamples2Crop = data.shape[0] - int(data.shape[0] / model.measDim) * model.measDim
             data = (data[nSamples2Crop:]).transpose(1, 2).reshape(-1, model.measDim, data.shape[1]).transpose(1, 2)
         '''
+        labels = sentencesEstimationResults_sampled[batchStartIdx:batchStopIdx]#.long()  # .to('cuda')
+        pitchLabels = sentencesEstimationPitchResults_sampled[batchStartIdx:batchStopIdx]#.float()  # .to('cuda')
+
         batch = list()
-        for singleWav in data:
-            audio, _, _ = t_transforms.apply((singleWav, fs), 0)
-            batch.append((audio, fs, 0))
+        for singleWavIdx, singleWav in enumerate(data):
+
+            if validateOnly:
+                audio, _, _ = t_transforms.apply((singleWav, fs), 0)
+            else:
+                audio, _, _ = v_transforms.apply((singleWav, fs), 0)
+
+            # audio, _, _ = v_transforms.apply((singleWav, fs), 0)
+            batch.append((audio, labels[singleWavIdx], pitchLabels[singleWavIdx], inputSentenceIndexes[singleWavIdx+batchStartIdx]))
+
+
 
         # sort_ind should point to length
         sort_ind = 0
         sorted_batch = sorted(batch, key=lambda x: x[0].size(sort_ind), reverse=True)
-        seqs, srs, fakeLabel = zip(*sorted_batch)
+        seqs, labels, pitchLabels, originalIndexes = zip(*sorted_batch)
 
-        lengths, srs, fakeLabel = map(torch.LongTensor, [[x.size(sort_ind) for x in seqs], srs, fakeLabel])
+        lengths, labels, originalIndexes = map(torch.LongTensor, [[x.size(sort_ind) for x in seqs], labels, originalIndexes])
+        _, pitchLabels = map(torch.FloatTensor, [[x.size(sort_ind) for x in seqs], pitchLabels])
+
+        inputSentenceIndexes[batchStartIdx:batchStopIdx] = originalIndexes
 
         # seqs_pad -> (batch, time, channel)
         seqs_pad = torch.nn.utils.rnn.pad_sequence(seqs, batch_first=True, padding_value=0)
         # seqs_pad = seqs_pad_t.transpose(0,1)
-        batch = [seqs_pad, lengths, srs, fakeLabel]
+        batch = [seqs_pad, lengths, labels, pitchLabels]
         batch = [b.to('cuda') for b in batch]
-        data = batch[:-1]
+        data = batch[:-2]
         data = data if len(data) > 1 else data[0]
 
-        labels = sentencesEstimationResults_sampled[batchStartIdx:batchStopIdx].long().to('cuda')
-        pitchLabels = sentencesEstimationPitchResults_sampled[batchStartIdx:batchStopIdx].float().to('cuda')
-        sampledGender, sampledSpeaker, sampledWord, sampledPitch = labels[:, 0], labels[:, 1], labels[:, 2], pitchLabels[:, 0]
+        sampledGender, sampledSpeaker, sampledWord, sampledPitch = batch[2][:, 0], batch[2][:, 1], batch[2][:, 2], batch[3][:, 0]
 
         if not validateOnly: optimizer.zero_grad()
         genderProbs, speakerProbs, wordProbs, pitchMean, pitchLogVar, mu, logvar, z = model(data)
+        wordProbs = mu[:, :10]
         # t = time.time()
 
-        if enableSimpleClassification:
-            loss, nCorrectPredictionsSingleBatch = loss_function_classification_prob(z, sampledWord)
-            nCorrectPredictions += nCorrectPredictionsSingleBatch.float()/batchSize
+        if False:
+            loss, nCorrectPredictionsSingleBatch = loss_function_classification_prob(mu, sampledWord)
+            #nCorrectPredictions += nCorrectPredictionsSingleBatch.float()/batchSize
         else:
             loss = loss_function(beta, mu, logvar, genderProbs, speakerProbs, wordProbs, pitchMean, pitchLogVar, sampledGender, sampledSpeaker, sampledWord, sampledPitch, model.nDrawsFromSingleEncoderOutput)
 
