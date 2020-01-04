@@ -25,6 +25,8 @@ from copy import deepcopy
 import amfm_decompy.pYAAPT as pYAAPT
 import amfm_decompy.basic_tools as basic
 
+import data as data_module
+
 def createAudioMNIST_metadataDict():
     path2AudioMNIST = '../AudioMNIST/data/'
     audioMNIST_metadata = {
@@ -1339,70 +1341,17 @@ def sampleFromSmoothing(sentencesEstimationResults, enableSimpleClassification=F
 
 def generateAudioMatrix(sentencesDatasetsAudio, nSamplesInSingleLSTM_input, enableSpectrogram, fs, maxSentenceLengh):
     nSentences = len(sentencesDatasetsAudio)
-    sentenceAudioMat = np.zeros((len(sentencesDatasetsAudio), int(maxSentenceLengh/3)))
+    #sentenceAudioMat = np.zeros((len(sentencesDatasetsAudio), int(maxSentenceLengh)))
+    sentenceAudioList = list()
+    lengths = np.zeros(nSentences)
+    scaler = MinMaxScaler(feature_range=(-1, 1))
     for sentenceIdx, sentence in enumerate(sentencesDatasetsAudio):
         wav = sentence[1][1]
-        if wav.shape[0] < maxSentenceLengh:
-            zeroPaddedWav = np.concatenate((np.zeros(maxSentenceLengh - len(wav)), wav))
-        else:
-            zeroPaddedWav = wav[-maxSentenceLengh:]
-        sentenceAudioMat[sentenceIdx] = zeroPaddedWav[::3]
-    sentenceAudioMat = np.expand_dims(sentenceAudioMat.transpose(), axis=2)  # [time, sentenceIdx, feature]
-    # plt.plot(sentenceAudioMat[:,0,0])
-    scaler = MinMaxScaler(feature_range=(-1, 1))
-    sentenceAudioMat = np.expand_dims(scaler.fit_transform(sentenceAudioMat[:, :, 0]), axis=2)
-    # plt.plot(sentenceAudioMat[:, 0, 0])
-    if enableSpectrogram:
-        f, t, Sxx = signal.spectrogram(x=sentenceAudioMat, fs=fs, nperseg=nSamplesInSingleLSTM_input, return_onesided=True, axis=0)
-        '''
-        listLen = sentenceAudioMat.shape[1]
-        batchLength = 2000
-        nListBatches = int(np.ceil(listLen / batchLength))
-        for listBatchIdx in range(nListBatches):
-            f, PxxSingleBatch  = signal.welch(x=sentenceAudioMat[:, listBatchIdx*batchLength:(listBatchIdx+1)*batchLength], fs=fs, window='hann', nperseg=256,  nfft=256, axis=0)
-            if listBatchIdx == 0:
-                Pxx = PxxSingleBatch
-            else:
-                Pxx = np.concatenate((Pxx, PxxSingleBatch), axis=1)
-        t = np.zeros(1)
-        Sxx = np.expand_dims(Pxx, axis=2)
-        '''
+        wav = scaler.fit_transform(wav.reshape(-1,1))
+        lengths[sentenceIdx] = len(wav)
+        sentenceAudioList.append(wav)
 
-        # plt.pcolormesh(t, f, Sxx[:,0,0,:])
-        # remove frequencies above fs/5:
-        fsFactor = 8
-        SxxFreqCropped = Sxx[np.where(f < fs / fsFactor)[0]]
-        fCropped = f[np.where(f < fs / fsFactor)[0]]
-        # plt.pcolormesh(t, fCropped, SxxFreqCropped[:, 0, 0, :])
-        # scale:
-        SxxScaled = np.zeros_like(SxxFreqCropped)
-        for sentenceIdx in range(nSentences):
-            print('starting scaling sentence %d out of %d' % (sentenceIdx, nSentences))
-            x = SxxFreqCropped[:, sentenceIdx, 0, :].reshape(-1)
-            xt, _ = stats.boxcox(x + 1e-30)
-            SxxScaled[:, sentenceIdx:sentenceIdx+1, 0:1, :] = xt.reshape(SxxFreqCropped[:, sentenceIdx:sentenceIdx+1, 0:1, :].shape)
-            '''
-            fig = plt.figure()
-            ax1 = fig.add_subplot(211)
-            prob = stats.probplot(x, dist=stats.norm, plot=ax1)
-            ax1.set_xlabel('')
-            ax1.set_title('Probplot against normal distribution')
-            ax2 = fig.add_subplot(212)
-            prob = stats.probplot(xt, dist=stats.norm, plot=ax2)
-            ax2.set_title('Probplot after Box-Cox transformation')
-            plt.show()
-            '''
-        sentenceAudioMat = SxxScaled.transpose(3, 1, 0, 2)[:, :, :, 0]
-
-        #sentenceAudioMat = scaler.fit_transform(SxxFreqCropped.transpose(1, 3, 0, 2).squeeze(axis=-1).reshape(nSentences, -1)).reshape(nSentences, t.shape[0], np.where(f < fs / fsFactor)[0].shape[0]).transpose(1, 0, 2)
-        '''
-        plt.subplot(1,2,1)
-        plt.pcolormesh(t, f, Sxx[:, 0, 0, :], norm=mpl.colors.Normalize(vmin=-1., vmax=1.))
-        plt.subplot(1,2,2)
-        plt.pcolormesh(t, f, sentenceAudioMat[:, 0, :].transpose(), norm=mpl.colors.Normalize(vmin=-1., vmax=1.))
-        plt.show()
-        '''
-    return sentenceAudioMat
+    return sentenceAudioList, lengths
 
 class VAE(nn.Module):
     def __init__(self, measDim, useLSTM, lstmHiddenSize, lstmNumLayers, nDrawsFromSingleEncoderOutput, zDim):
@@ -1599,49 +1548,59 @@ def getProbabilitiesLUT(genderProbs, speakerProbs, wordProbs, pitchMean, pitchLo
         probabilitiesLUT.append([clustersWeights, clustersRepresentatives])
     return probabilitiesLUT
 
-def trainFunc(beta, sentencesAudioInputMatrix, sentencesEstimationResults_sampled, sentencesEstimationPitchResults_sampled, model, optimizer, epoch, validateOnly=False, enableSpectrogram=False, enableSimpleClassification=False):
+def trainFunc(t_transforms, beta, sentencesAudioInputMatrix, sentencesEstimationResults_sampled, sentencesEstimationPitchResults_sampled, model, optimizer, lr_scheduler, epoch, validateOnly=False, enableSpectrogram=False, enableSimpleClassification=False):
     if validateOnly:
         model.eval()
     else:
         model.train()
 
     total_loss = 0
-
-    batchSize = 200
-    nSentences = sentencesAudioInputMatrix.shape[1]
-    nBatches = int(nSentences/batchSize)
+    fs = 48000
+    fakeLabel = 0 # for compatability
+    batchSize = 24
+    nSentences = len(sentencesAudioInputMatrix)
+    nBatches = int(np.ceil(nSentences/batchSize))
     nDecoders = model.nDrawsFromSingleEncoderOutput
 
     inputSentenceIndexes = torch.randperm(nSentences)
-    sentencesAudioInputMatrix, sentencesEstimationResults_sampled, sentencesEstimationPitchResults_sampled = sentencesAudioInputMatrix[:, inputSentenceIndexes], sentencesEstimationResults_sampled[inputSentenceIndexes], sentencesEstimationPitchResults_sampled[inputSentenceIndexes]
+    sentencesEstimationResults_sampled, sentencesEstimationPitchResults_sampled = sentencesEstimationResults_sampled[inputSentenceIndexes], sentencesEstimationPitchResults_sampled[inputSentenceIndexes]
+    sentencesAudioInputMatrix = [sentencesAudioInputMatrix[index] for index in inputSentenceIndexes]
 
-
-    # time shift for augmenting the data:
-    if not validateOnly:
-        shiftBy = torch.randint(0, int(sentencesAudioInputMatrix.shape[0] / 4), (1,))
-        if torch.randint(0,2,(1,)) == 1:
-            sentencesAudioInputMatrix = torch.cat((sentencesAudioInputMatrix[shiftBy:], sentencesAudioInputMatrix[:shiftBy]), dim=0)
-        else:
-            sentencesAudioInputMatrix = torch.cat((sentencesAudioInputMatrix[-shiftBy:], sentencesAudioInputMatrix[:-shiftBy]), dim=0)
-
-    # shuffle all time-tags:
-    if False:  #not validateOnly:
-        timeShuffleIndexes = torch.randperm(sentencesAudioInputMatrix.shape[0])
-        sentencesAudioInputMatrix = sentencesAudioInputMatrix[timeShuffleIndexes]
 
     if validateOnly: probabilitiesLUT = list()
     if enableSimpleClassification: nCorrectPredictions = 0.0
     for batchIdx in range(nBatches):
+        batchStartIdx, batchStopIdx = batchIdx * batchSize, min(nSentences, (batchIdx + 1) * batchSize)
         if batchIdx == 0: print('epoch %d: starting batch %d out of %d' % (epoch, batchIdx, nBatches))
-        data = sentencesAudioInputMatrix[:, batchIdx * batchSize:(batchIdx + 1) * batchSize].float()#.cuda()
+        data = [sentencesAudioInputMatrix[index] for index in range(batchStartIdx, batchStopIdx)]
         '''
         # crop beginning to have integer size of model.measDim and then reshape to have model.measDim features:
         if not enableSpectrogram:
             nSamples2Crop = data.shape[0] - int(data.shape[0] / model.measDim) * model.measDim
             data = (data[nSamples2Crop:]).transpose(1, 2).reshape(-1, model.measDim, data.shape[1]).transpose(1, 2)
         '''
-        labels = sentencesEstimationResults_sampled[batchIdx * batchSize:(batchIdx + 1) * batchSize].long()#.cuda()
-        pitchLabels = sentencesEstimationPitchResults_sampled[batchIdx * batchSize:(batchIdx + 1) * batchSize].float()#.cuda()
+        batch = list()
+        for singleWav in data:
+            audio, _, _ = t_transforms.apply((singleWav, fs), 0)
+            batch.append((audio, fs, 0))
+
+        # sort_ind should point to length
+        sort_ind = 0
+        sorted_batch = sorted(batch, key=lambda x: x[0].size(sort_ind), reverse=True)
+        seqs, srs, fakeLabel = zip(*sorted_batch)
+
+        lengths, srs, fakeLabel = map(torch.LongTensor, [[x.size(sort_ind) for x in seqs], srs, fakeLabel])
+
+        # seqs_pad -> (batch, time, channel)
+        seqs_pad = torch.nn.utils.rnn.pad_sequence(seqs, batch_first=True, padding_value=0)
+        # seqs_pad = seqs_pad_t.transpose(0,1)
+        batch = [seqs_pad, lengths, srs, fakeLabel]
+        batch = [b.to('cuda') for b in batch]
+        data = batch[:-1]
+        data = data if len(data) > 1 else data[0]
+
+        labels = sentencesEstimationResults_sampled[batchStartIdx:batchStopIdx].long().to('cuda')
+        pitchLabels = sentencesEstimationPitchResults_sampled[batchStartIdx:batchStopIdx].float().to('cuda')
         sampledGender, sampledSpeaker, sampledWord, sampledPitch = labels[:, 0], labels[:, 1], labels[:, 2], pitchLabels[:, 0]
 
         if not validateOnly: optimizer.zero_grad()
@@ -1668,6 +1627,7 @@ def trainFunc(beta, sentencesAudioInputMatrix, sentencesEstimationResults_sample
             else:
                 probabilitiesLUT += getProbabilitiesLUT(F.softmax(genderProbs, dim=1).cpu().detach(), F.softmax(speakerProbs, dim=1).cpu().detach(), F.softmax(wordProbs, dim=1).cpu().detach(), 0*pitchMean.cpu().detach(), 0*pitchLogVar.cpu().detach(), nDecoders)
 
+    lr_scheduler.step()
     if validateOnly:
         probabilitiesLUTOut = [None]*nSentences
         for sentenceIdx in range(nSentences):
