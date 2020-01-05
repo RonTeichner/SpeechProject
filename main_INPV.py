@@ -72,7 +72,7 @@ path2MaxSentence = './maxSentence.pt'
 path2AllLengths = './allLengths.pt'
 
 enableWordOnlyClassificationAtEncoderOutput = False
-enableTrain_wrt_groundTruth = True
+enableTrain_wrt_groundTruth = False
 enableSpectrogram = False
 
 nGenders = 2
@@ -181,7 +181,7 @@ v_transforms = getattr(data_module, tsf_name)('val', tsf_args)
 print(t_transforms)
 
 nTimeIndexes = 5
-beta = 0.001
+beta = 0
 m_name = 'AudioCRNN'
 
 config = json.load(open('my-config.json'))
@@ -262,7 +262,7 @@ sentencesEstimationPitchResultsValidate_sampled = pitchScaler.transform(sentence
 sentencesEstimationPitchResultsTest_sampled = pitchScaler.transform(sentencesEstimationPitchResultsTest_sampled)
 
 
-nEpochs = 30+1
+nEpochs = 1000+1
 trainLoss = np.zeros(nEpochs)
 epochVecTrain = np.arange(nEpochs)
 validateLoss, testLoss, epochVec = list(), list(), list()
