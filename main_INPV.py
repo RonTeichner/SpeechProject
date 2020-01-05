@@ -72,7 +72,7 @@ path2MaxSentence = './maxSentence.pt'
 path2AllLengths = './allLengths.pt'
 
 enableWordOnlyClassificationAtEncoderOutput = False
-enableTrain_wrt_groundTruth = False
+enableTrain_wrt_groundTruth = True
 enableSpectrogram = False
 
 nGenders = 2
@@ -181,7 +181,7 @@ v_transforms = getattr(data_module, tsf_name)('val', tsf_args)
 print(t_transforms)
 
 nTimeIndexes = 5
-beta = 0# 0.01# 0.01 #0.0025  # [0.005, 0.001]
+beta = 0.001
 m_name = 'AudioCRNN'
 
 config = json.load(open('my-config.json'))
