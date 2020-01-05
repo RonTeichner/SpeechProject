@@ -187,7 +187,7 @@ m_name = 'AudioCRNN'
 config = json.load(open('my-config.json'))
 config['net_mode'] = 'init'
 config['cfg'] = 'crnn.cfg'
-model = net_module.AudioCRNN(config=config, nDrawsFromSingleEncoderOutput=10).to('cuda')
+model = net_module.AudioCRNN(config=config, nDrawsFromSingleEncoderOutput=100).to('cuda')
 
 trainable_params = filter(lambda p: p.requires_grad, model.parameters())
 
