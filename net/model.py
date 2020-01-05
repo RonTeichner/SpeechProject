@@ -36,7 +36,11 @@ class AudioCRNN(BaseModel):
         # shape -> (channel, freq, token_time)
         self.net = parse_cfg(config['cfg'], in_shape=[in_chan, self.spec.num_mels, 400])
         self.zDim = int(self.net['dense'].linear_0.out_features / 2)
-        self.fc6 = nn.Linear(self.zDim, self.genderMultivariate + self.speakerMultivariate + self.wordMultivariate + 2*self.nContinuesParameters)
+
+        self.outDim = self.genderMultivariate + self.speakerMultivariate + self.wordMultivariate + 2*self.nContinuesParameters
+
+        self.fc5 = nn.Linear(self.zDim, self.outDim)
+        self.fc6 = nn.Linear(self.outDim, self.outDim)
 
         # general:
         self.logSoftMax = nn.LogSoftmax(dim=1)
@@ -66,13 +70,13 @@ class AudioCRNN(BaseModel):
         eps = torch.randn_like(std)
         return mu + eps*std
 
-    def decode(self, z):
+    def decoder(self, z):
         #h3 = self.LeakyReLU(self.fc3(z))
         #h4 = self.LeakyReLU(self.fc4(h3))
         #h5 = self.fc5(h4)
-
-        h5 = self.LeakyReLU(self.fc6(z))
-        return h5 # h3 here performed good without p(z) constrain
+        h5 = self.LeakyReLU(self.fc5(z))
+        h6 = self.LeakyReLU(self.fc6(h5))
+        return h6 # h3 here performed good without p(z) constrain
 
     def encoder(self, batch):
         # x-> (batch, time, channel)
@@ -116,7 +120,7 @@ class AudioCRNN(BaseModel):
         mu, logvar = self.encoder(batch)
         # plt.plot(batch[0][0].cpu().numpy())
         z = self.reparameterize(mu.repeat(self.nDrawsFromSingleEncoderOutput, 1), logvar.repeat(self.nDrawsFromSingleEncoderOutput, 1))
-        decoderOut = self.decode(z)
+        decoderOut = self.decoder(z)
         genderProbs, speakerProbs, wordProbs, pitchMean, pitchLogVar = decoderOut[:, :self.genderMultivariate], decoderOut[:, self.genderMultivariate:self.genderMultivariate+self.speakerMultivariate], decoderOut[:, self.genderMultivariate+self.speakerMultivariate : self.genderMultivariate+self.speakerMultivariate+self.wordMultivariate], decoderOut[:, self.genderMultivariate+self.speakerMultivariate+self.wordMultivariate : self.genderMultivariate+self.speakerMultivariate+self.wordMultivariate+1], decoderOut[:, self.genderMultivariate+self.speakerMultivariate+self.wordMultivariate+1 : self.genderMultivariate+self.speakerMultivariate+self.wordMultivariate+2]
         return genderProbs, speakerProbs, wordProbs, pitchMean, pitchLogVar, mu, logvar, z
 
