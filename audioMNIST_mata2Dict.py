@@ -1060,7 +1060,7 @@ def plotSentenceResults(testSet, sentencesEstimationResults, maleIdx, femaleIdx,
     # convert model first-word estimations to np-arrays:
     genderIdx_NN, speakerIdx_NN, wordIdx_NN, pitchIdx_NN = np.arange(4)
     nSentences = len(sentencesEstimationResults)
-    classCategories = ['word', 'gender', 'speaker', 'pitch']
+    classCategories = ['word', 'gender', 'speaker', 'pitchStd', 'pitchMean']
     collectedFirstWordSentenceResults = dict()
     for estimationClass in classCategories:
         collectedFirstWordSentenceResults[estimationClass] = dict()
@@ -1093,7 +1093,7 @@ def plotSentenceResults(testSet, sentencesEstimationResults, maleIdx, femaleIdx,
                 if sentencesEstimationResults_NN is not None:
                     trueValIndexesInLUT = np.where(LUT_NN[:, speakerIdx_NN] == trueSpeakerNo)[0]
                     firstDigit_INPV[sentenceIdx] = np.sum([weights_NN[i] for i in trueValIndexesInLUT])
-            elif estimationClass == 'pitch':
+            elif estimationClass == 'pitchStd':
                 firstDigit_filtering[sentenceIdx] = calcStdOfMixOf2(sentenceResult['results']['pitch']['filtering']['means'][:, 0], sentenceResult['results']['pitch']['filtering']['covs'][:, 0], sentenceResult['results']['pitch']['filtering']['weights'][:, 0])
                 firstDigit_smoothing[sentenceIdx] = calcStdOfMixOf2(sentenceResult['results']['pitch']['filtering']['means'][:, -1], sentenceResult['results']['pitch']['filtering']['covs'][:, -1], sentenceResult['results']['pitch']['filtering']['weights'][:, -1])
                 if sentencesEstimationResults_NN is not None:
@@ -1101,6 +1101,13 @@ def plotSentenceResults(testSet, sentencesEstimationResults, maleIdx, femaleIdx,
                     pitchMean_NN = pitchValues_NN.mean()
                     pitchVar = np.sum(np.multiply(weights_NN, np.power(pitchValues_NN-pitchMean_NN, 2)))
                     firstDigit_INPV[sentenceIdx] = np.sqrt(pitchVar)
+            elif estimationClass == 'pitchMean':
+                firstDigit_filtering[sentenceIdx] = calcMeanOfMixOf2(sentenceResult['results']['pitch']['filtering']['means'][:, 0], sentenceResult['results']['pitch']['filtering']['covs'][:, 0], sentenceResult['results']['pitch']['filtering']['weights'][:, 0])
+                firstDigit_smoothing[sentenceIdx] = calcMeanOfMixOf2(sentenceResult['results']['pitch']['filtering']['means'][:, -1], sentenceResult['results']['pitch']['filtering']['covs'][:, -1], sentenceResult['results']['pitch']['filtering']['weights'][:, -1])
+                if sentencesEstimationResults_NN is not None:
+                    pitchValues_NN = LUT_NN[:, pitchIdx_NN]
+                    pitchMean_NN = pitchValues_NN.mean()
+                    firstDigit_INPV[sentenceIdx] = pitchMean_NN
         collectedFirstWordSentenceResults[estimationClass]['filtering'] = firstDigit_filtering
         collectedFirstWordSentenceResults[estimationClass]['smoothing'] = firstDigit_smoothing
         if sentencesEstimationResults_NN is not None:
@@ -1126,15 +1133,21 @@ def plotSentenceResults(testSet, sentencesEstimationResults, maleIdx, femaleIdx,
         plt.legend(loc='right')
         #plt.title(estimationClass + ' likelihood CDF; avg(R,F,S) = (%02.0f%%,%02.0f%%,%02.0f%%)' % (meanRaw * 100, meanFiltering * 100, meanSmoothing * 100))
         if sentencesEstimationResults_NN is not None:
-            if estimationClass == 'pitch':
-                plt.title(estimationClass + ' std avg(F,S) = (%02.0f,%02.0f,%02.0f) Hz' % (meanFiltering, meanSmoothing, meanINPV))
+            if estimationClass == 'pitchStd':
+                plt.title(estimationClass + ' avg(F,S) = (%02.0f,%02.0f,%02.0f) Hz' % (meanFiltering, meanSmoothing, meanINPV))
+                plt.xlabel('Hz')
+            elif estimationClass == 'pitchMean':
+                plt.title(estimationClass + ' avg(F,S) = (%02.0f,%02.0f,%02.0f) Hz' % (meanFiltering, meanSmoothing, meanINPV))
                 plt.xlabel('Hz')
             else:
                 plt.title(estimationClass + ' avg(F,S) = (%02.0f%%,%02.0f%%,%02.0f%%)' % (meanFiltering * 100, meanSmoothing * 100, meanINPV * 100))
                 plt.xlabel('likelihood')
         else:
-            if estimationClass == 'pitch':
-                plt.title(estimationClass + ' std avg(F,S) = (%02.0f,%02.0f) Hz' % (meanFiltering, meanSmoothing))
+            if estimationClass == 'pitchStd':
+                plt.title(estimationClass + ' avg(F,S) = (%02.0f,%02.0f) Hz' % (meanFiltering, meanSmoothing))
+                plt.xlabel('Hz')
+            elif estimationClass == 'pitchMean':
+                plt.title(estimationClass + ' avg(F,S) = (%02.0f,%02.0f) Hz' % (meanFiltering, meanSmoothing))
                 plt.xlabel('Hz')
             else:
                 plt.title(estimationClass + ' avg(F,S) = (%02.0f%%,%02.0f%%)' % (meanFiltering * 100, meanSmoothing * 100))
@@ -1177,6 +1190,9 @@ def plotSentenceResults(testSet, sentencesEstimationResults, maleIdx, femaleIdx,
 
 def calcStdOfMixOf2(means, covs, weights):
     return np.sqrt(weights[0]*covs[0] + weights[1]*covs[1] + weights[0]*np.power(means[0], 2) + weights[1]*np.power(means[1], 2) - np.power(weights[0]*means[0] + weights[1]*means[1], 2))
+
+def calcMeanOfMixOf2(means, covs, weights):
+    return np.dot(weights, means)
 
 def limitFeatures(inputFeatures, chosenFeatures=[]):
     if chosenFeatures == []:
@@ -1490,7 +1506,7 @@ def loss_function(beta, mu, logvar, genderProbs, speakerProbs, wordProbs, pitchM
     pitchMean = torch.squeeze(pitchMean)
     pitchLogVar = torch.squeeze(pitchLogVar)
 
-    #pitchNLL = -torch.mul(pitchLogVar, 0.5) - torch.mul(torch.pow(torch.div(sampledPitch - pitchMean, torch.exp(torch.mul(pitchLogVar, 0.5))), 2), 0.5)
+    pitchNLL = -(-0.4 - torch.mul(pitchLogVar, 0.5) - torch.mul(torch.pow(torch.div(sampledPitch - pitchMean, torch.exp(torch.mul(pitchLogVar, 0.5))), 2), 0.5))
     '''
     t = time.time()
     pitchNLL = [torch.distributions.normal.Normal(pitchMean[pitchIdx], pitchLogVar[pitchIdx].mul(0.5).exp_()).log_prob(sampledPitch[pitchIdx]) for pitchIdx in range(pitchMean.shape[0])]
@@ -1507,8 +1523,8 @@ def loss_function(beta, mu, logvar, genderProbs, speakerProbs, wordProbs, pitchM
     print('loss function - pitch for duration: ', time.time() - t, ' sec')
     '''
 
-    #totalNLL_max = (genderNLL+speakerNLL+wordNLL+pitchNLL).reshape(-1, batchSize).max(dim=0)[0].sum()  # each column has the nDecoders different outputs from the same encoder's output, then max is performed
-    totalNLL_max = (genderNLL+speakerNLL+wordNLL).reshape(-1, batchSize).max(dim=0)[0].sum()
+    totalNLL_max = (genderNLL+speakerNLL+wordNLL+pitchNLL).reshape(-1, batchSize).max(dim=0)[0].sum()  # each column has the nDecoders different outputs from the same encoder's output, then max is performed
+    #totalNLL_max = (genderNLL+speakerNLL+wordNLL).reshape(-1, batchSize).max(dim=0)[0].sum()
     #totalNLL_max = (wordNLL).reshape(-1, batchSize).max(dim=0)[0].sum()
     #totalNLL_max = (genderNLL).reshape(-1, batchSize).max(dim=0)[0].sum()
 
@@ -1549,7 +1565,7 @@ def getProbabilitiesLUT(genderProbs, speakerProbs, wordProbs, pitchMean, pitchLo
         probabilitiesLUT.append([clustersWeights, clustersRepresentatives])
     return probabilitiesLUT
 
-def trainFunc(t_transforms, v_transforms, beta, sentencesAudioInputMatrix, sentencesEstimationResults_sampled, sentencesEstimationPitchResults_sampled, model, optimizer, lr_scheduler, epoch, validateOnly=False, enableSpectrogram=False, enableSimpleClassification=False):
+def trainFunc(pitchScaler, t_transforms, v_transforms, beta, sentencesAudioInputMatrix, sentencesEstimationResults_sampled, sentencesEstimationPitchResults_sampled, model, optimizer, lr_scheduler, epoch, validateOnly=False, enableSpectrogram=False, enableSimpleClassification=False):
     if validateOnly:
         model.eval()
     else:
@@ -1626,9 +1642,18 @@ def trainFunc(t_transforms, v_transforms, beta, sentencesAudioInputMatrix, sente
             #nCorrectPredictions += nCorrectPredictionsSingleBatch.float()/batchSize
         else:
             loss = loss_function(beta, mu, logvar, genderProbs, speakerProbs, wordProbs, pitchMean, pitchLogVar, sampledGender, sampledSpeaker, sampledWord, sampledPitch, model.nDrawsFromSingleEncoderOutput)
+        #print(f'loss: {loss.item() / batchSize}')
 
         # print('loss function duration: ', 1000*(time.time()-t), ' ms')
-        if not validateOnly: loss.backward()
+        if not validateOnly:
+            loss.backward()
+            '''
+            grads = []
+            for param in model.parameters():
+                grads.append(param.grad.view(-1))
+            grads = torch.cat(grads)
+            print(f'loss: {loss.item() / batchSize}      max grad: {grads.abs().max()}')
+            '''
         total_loss += loss.item() / batchSize
         if not validateOnly: optimizer.step()
 
@@ -1639,7 +1664,9 @@ def trainFunc(t_transforms, v_transforms, beta, sentencesAudioInputMatrix, sente
                 wordVecLUT, wordVecResults = wordVecFromProbabilitiesLUT(singleBatchProbabilitiesLUT), sampledWord.cpu().numpy()  # wordVecFromResults(sentencesEstimationResultsTrain[:1000])
                 print('%% correct in batch %d' % ((wordVecLUT.round() == wordVecResults.round()).sum() / len(wordVecLUT) * 100))
             else:
-                probabilitiesLUT += getProbabilitiesLUT(F.softmax(genderProbs, dim=1).cpu().detach(), F.softmax(speakerProbs, dim=1).cpu().detach(), F.softmax(wordProbs, dim=1).cpu().detach(), 0*pitchMean.cpu().detach(), 0*pitchLogVar.cpu().detach(), nDecoders)
+                pitchNormalizedMean, pitchNormalizedLogVar = pitchMean.cpu().detach(), pitchLogVar.cpu().detach()
+                pitchMean, pitchLogVar = torch.tensor(pitchScaler.inverse_transform(pitchNormalizedMean)), torch.mul(torch.log(torch.tensor(pitchScaler.inverse_transform(np.exp(np.multiply(pitchNormalizedLogVar, 0.5))))), 2)
+                probabilitiesLUT += getProbabilitiesLUT(F.softmax(genderProbs, dim=1).cpu().detach(), F.softmax(speakerProbs, dim=1).cpu().detach(), F.softmax(wordProbs, dim=1).cpu().detach(), pitchMean, pitchLogVar, nDecoders)
 
     lr_scheduler.step()
     if validateOnly:

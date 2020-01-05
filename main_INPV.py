@@ -180,8 +180,6 @@ t_transforms = getattr(data_module, tsf_name)('train', tsf_args)
 v_transforms = getattr(data_module, tsf_name)('val', tsf_args)
 print(t_transforms)
 
-
-
 nTimeIndexes = 5
 beta = 0# 0.01# 0.01 #0.0025  # [0.005, 0.001]
 m_name = 'AudioCRNN'
@@ -189,7 +187,7 @@ m_name = 'AudioCRNN'
 config = json.load(open('my-config.json'))
 config['net_mode'] = 'init'
 config['cfg'] = 'crnn.cfg'
-model = net_module.AudioCRNN(config=config, nDrawsFromSingleEncoderOutput=1).to('cuda')
+model = net_module.AudioCRNN(config=config, nDrawsFromSingleEncoderOutput=5).to('cuda')
 
 trainable_params = filter(lambda p: p.requires_grad, model.parameters())
 
@@ -252,31 +250,43 @@ sentencesEstimationPitchResultsTest_sampled = sentencesEstimationResultsTest_sam
 sentencesEstimationResultsTest_sampled = sentencesEstimationResultsTest_sampled[:, :3]#torch.tensor(sentencesEstimationResultsTest_sampled[:, :3], dtype=torch.uint8)#.cuda()
 #sentencesAudioInputMatrixTest = torch.tensor(sentencesAudioInputMatrixTest, dtype=torch.float32)#.cuda()
 
+# normalize pitch via the training set alone:
+pitchScaler = StandardScaler()
+pitchScaler.fit(sentencesEstimationPitchResultsTrain_sampled)
+# transforming:
+# n_bins = 20
+# n, bins, patches = plt.hist(sentencesEstimationPitchResultsTrain_sampled, n_bins, density=True, histtype='step', cumulative=False, label='hist')
+sentencesEstimationPitchResultsTrain_sampled = pitchScaler.transform(sentencesEstimationPitchResultsTrain_sampled)
+# n, bins, patches = plt.hist(sentencesEstimationPitchResultsTrain_sampled, n_bins, density=True, histtype='step', cumulative=False, label='hist')
+sentencesEstimationPitchResultsValidate_sampled = pitchScaler.transform(sentencesEstimationPitchResultsValidate_sampled)
+sentencesEstimationPitchResultsTest_sampled = pitchScaler.transform(sentencesEstimationPitchResultsTest_sampled)
 
-nEpochs = 100000
+
+nEpochs = 30+1
 trainLoss = np.zeros(nEpochs)
 epochVecTrain = np.arange(nEpochs)
 validateLoss, testLoss, epochVec = list(), list(), list()
 for epochIdx in range(nEpochs):
-    trainLoss[epochIdx], _ = trainFunc(t_transforms, v_transforms, beta, sentencesAudioInputMatrixTrain, sentencesEstimationResultsTrain_sampled, sentencesEstimationPitchResultsTrain_sampled, model, optimizer, lr_scheduler, epochIdx, validateOnly=False, enableSpectrogram=enableSpectrogram, enableSimpleClassification=enableWordOnlyClassificationAtEncoderOutput)
+    trainLoss[epochIdx], _ = trainFunc(pitchScaler, t_transforms, v_transforms, beta, sentencesAudioInputMatrixTrain, sentencesEstimationResultsTrain_sampled, sentencesEstimationPitchResultsTrain_sampled, model, optimizer, lr_scheduler, epochIdx, validateOnly=False, enableSpectrogram=enableSpectrogram, enableSimpleClassification=enableWordOnlyClassificationAtEncoderOutput)
     #trainLoss[epochIdx], _ = trainFunc(beta, sentencesAudioInputMatrixValidate, sentencesEstimationResultsValidate_sampled, sentencesEstimationPitchResultsValidate_sampled, model, optimizer, epochIdx, validateOnly=False, enableSpectrogram=enableSpectrogram, enableSimpleClassification=enableWordOnlyClassificationAtEncoderOutput)
-    if epochIdx % 10 == 0:# and epochIdx > 0:
+    if epochIdx % 10 == 0 and epochIdx > 0:
         epochVec.append(epochIdx)
         #try:
 
-        _, probabilitiesLUT = trainFunc(t_transforms, v_transforms, beta, sentencesAudioInputMatrixTrain[:1000], sentencesEstimationResultsTrain_sampled[:1000], sentencesEstimationPitchResultsTrain_sampled[:1000], model, optimizer, lr_scheduler, epochIdx, validateOnly=True, enableSpectrogram=enableSpectrogram, enableSimpleClassification=enableWordOnlyClassificationAtEncoderOutput)
+        _, probabilitiesLUT = trainFunc(pitchScaler, t_transforms, v_transforms, beta, sentencesAudioInputMatrixTrain[:1000], sentencesEstimationResultsTrain_sampled[:1000], sentencesEstimationPitchResultsTrain_sampled[:1000], model, optimizer, lr_scheduler, epochIdx, validateOnly=True, enableSpectrogram=enableSpectrogram, enableSimpleClassification=enableWordOnlyClassificationAtEncoderOutput)
         plotSentenceResults('Train', sentencesEstimationResultsTrain[:1000], maleIdx, femaleIdx, path2FigValidate.split('.png')[0] + '_Trainepoch_%d' % epochIdx + '.png', sentencesEstimationResults_NN=probabilitiesLUT)
 
-        validateLossEpoch, probabilitiesLUT = trainFunc(t_transforms, v_transforms, beta, sentencesAudioInputMatrixValidate, sentencesEstimationResultsValidate_sampled, sentencesEstimationPitchResultsValidate_sampled, model, optimizer, lr_scheduler, epochIdx, validateOnly=True, enableSpectrogram=enableSpectrogram, enableSimpleClassification=enableWordOnlyClassificationAtEncoderOutput)
+        validateLossEpoch, probabilitiesLUT = trainFunc(pitchScaler, t_transforms, v_transforms, beta, sentencesAudioInputMatrixValidate, sentencesEstimationResultsValidate_sampled, sentencesEstimationPitchResultsValidate_sampled, model, optimizer, lr_scheduler, epochIdx, validateOnly=True, enableSpectrogram=enableSpectrogram, enableSimpleClassification=enableWordOnlyClassificationAtEncoderOutput)
         validateLoss.append(validateLossEpoch)
         plotSentenceResults('Validate', sentencesEstimationResultsValidate, maleIdx, femaleIdx, path2FigValidate.split('.png')[0] + '_epoch_%d' % epochIdx + '.png', sentencesEstimationResults_NN=probabilitiesLUT)
 
-        testLossEpoch, probabilitiesLUT = trainFunc(t_transforms, v_transforms, beta, sentencesAudioInputMatrixTest, sentencesEstimationResultsTest_sampled, sentencesEstimationPitchResultsTest_sampled, model, optimizer, lr_scheduler, epochIdx, validateOnly=True, enableSpectrogram=enableSpectrogram, enableSimpleClassification=enableWordOnlyClassificationAtEncoderOutput)
+        testLossEpoch, probabilitiesLUT = trainFunc(pitchScaler, t_transforms, v_transforms, beta, sentencesAudioInputMatrixTest, sentencesEstimationResultsTest_sampled, sentencesEstimationPitchResultsTest_sampled, model, optimizer, lr_scheduler, epochIdx, validateOnly=True, enableSpectrogram=enableSpectrogram, enableSimpleClassification=enableWordOnlyClassificationAtEncoderOutput)
         testLoss.append(testLossEpoch)
         plotSentenceResults('Test', sentencesEstimationResultsTest, maleIdx, femaleIdx, path2FigTest.split('.png')[0] + '_epoch_%d' % epochIdx + '.png', sentencesEstimationResults_NN=probabilitiesLUT)
 
         fig = plt.subplots(figsize=(24, 10))
-        plt.plot(epochVecTrain[5:epochIdx+1], trainLoss[5:epochIdx+1], label='train')
+        firstEpochToPrint = 10
+        plt.plot(epochVecTrain[firstEpochToPrint:epochIdx+1], trainLoss[firstEpochToPrint:epochIdx+1], label='train')
         plt.plot(epochVec, validateLoss, label='validate')
         plt.plot(epochVec, testLoss, label='test')
         plt.legend()
