@@ -72,7 +72,7 @@ path2MaxSentence = './maxSentence.pt'
 path2AllLengths = './allLengths.pt'
 
 enableWordOnlyClassificationAtEncoderOutput = False
-enableTrain_wrt_groundTruth = True
+enableTrain_wrt_groundTruth = False
 enableSpectrogram = False
 
 nGenders = 2
