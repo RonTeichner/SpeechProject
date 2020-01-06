@@ -1574,7 +1574,7 @@ def trainFunc(pitchScaler, t_transforms, v_transforms, beta, sentencesAudioInput
     total_loss = 0
     fs = 48000
 
-    batchSize = 24
+    batchSize = 200
     nSentences = len(sentencesAudioInputMatrix)
     nBatches = int(np.ceil(nSentences/batchSize))
     nDecoders = model.nDrawsFromSingleEncoderOutput
