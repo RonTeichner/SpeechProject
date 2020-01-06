@@ -10,12 +10,35 @@ from .audio import MelspectrogramStretch
 from torchparse import parse_cfg
 
 # Architecture inspiration from: https://github.com/keunwoochoi/music-auto_tagging-keras
+def sample_gumbel(shape, eps=1e-20):
+    U = torch.rand(shape).cuda()
+    return -(torch.log(-torch.log(U + eps) + eps))
+
+def gumbel_softmax_sample(logits, temperature):
+    y = logits + sample_gumbel(logits.size())
+    return F.softmax(y / temperature, dim=-1)
+
+def gumbel_softmax(logits, temperature, latent_dim, categorical_dim):
+    """
+    ST-gumple-softmax
+    input: [*, n_class]
+    return: flatten --> [*, n_class] an one-hot vector
+    """
+    y = gumbel_softmax_sample(logits, temperature)
+    shape = y.size()
+    _, ind = y.max(dim=-1)
+    y_hard = torch.zeros_like(y).view(-1, shape[-1])
+    y_hard.scatter_(1, ind.view(-1, 1), 1)
+    y_hard = y_hard.view(*shape)
+    y_hard = (y_hard - y).detach() + y
+    return y_hard.view(-1,latent_dim*categorical_dim)
+
 class AudioCRNN(BaseModel):
-    def __init__(self, config={}, nDrawsFromSingleEncoderOutput=1, nDrawsFromSingleEncoderOutputEval=100, state_dict=None):
+    def __init__(self, config={}, nDrawsFromSingleEncoderOutput=1, nDrawsFromSingleEncoderOutputEval=100, enableDiscrete=False, state_dict=None):
         super(AudioCRNN, self).__init__(config)
         
         in_chan = 2 if config['transforms']['args']['channels'] == 'stereo' else 1
-
+        self.enableDiscrete = enableDiscrete
         #self.classes = classes
         self.nDrawsFromSingleEncoderOutput = nDrawsFromSingleEncoderOutput
         self.nDrawsFromSingleEncoderOutputEval = nDrawsFromSingleEncoderOutputEval
@@ -48,6 +71,8 @@ class AudioCRNN(BaseModel):
         self.LeakyReLU = nn.LeakyReLU()
         self.tanh = nn.Tanh()
         self.sigmoid = nn.Sigmoid()
+        self.categorical_dim = 2
+        self.temperature = 1.0
 
 
     def _many_to_one(self, t, lengths):
@@ -120,10 +145,20 @@ class AudioCRNN(BaseModel):
     def forward(self, batch):
         mu, logvar = self.encoder(batch)
         # plt.plot(batch[0][0].cpu().numpy())
-        if self.training:
-            z = self.reparameterize(mu.repeat(self.nDrawsFromSingleEncoderOutput, 1), logvar.repeat(self.nDrawsFromSingleEncoderOutput, 1))
+        if not self.enableDiscrete:
+            if self.training:
+                z = self.reparameterize(mu.repeat(self.nDrawsFromSingleEncoderOutput, 1), logvar.repeat(self.nDrawsFromSingleEncoderOutput, 1))
+            else:
+                z = self.reparameterize(mu.repeat(self.nDrawsFromSingleEncoderOutputEval, 1), logvar.repeat(self.nDrawsFromSingleEncoderOutputEval, 1))
         else:
-            z = self.reparameterize(mu.repeat(self.nDrawsFromSingleEncoderOutputEval, 1), logvar.repeat(self.nDrawsFromSingleEncoderOutputEval, 1))
+            q = mu  # torch.cat((mu, logvar), dim=1)
+            q_y = q.view(q.size(0), int(0.5*self.zDim), self.categorical_dim)
+            nRepeats = self.nDrawsFromSingleEncoderOutput if self.training else self.nDrawsFromSingleEncoderOutputEval
+            for i in range(nRepeats):
+                if i == 0:
+                    z = gumbel_softmax(q_y, self.temperature, int(0.5*self.zDim), self.categorical_dim)
+                else:
+                    z = torch.cat((z, gumbel_softmax(q_y, self.temperature, int(0.5*self.zDim), self.categorical_dim)), dim=0)
         decoderOut = self.decoder(z)
         genderProbs, speakerProbs, wordProbs, pitchMean, pitchLogVar = decoderOut[:, :self.genderMultivariate], decoderOut[:, self.genderMultivariate:self.genderMultivariate+self.speakerMultivariate], decoderOut[:, self.genderMultivariate+self.speakerMultivariate : self.genderMultivariate+self.speakerMultivariate+self.wordMultivariate], decoderOut[:, self.genderMultivariate+self.speakerMultivariate+self.wordMultivariate : self.genderMultivariate+self.speakerMultivariate+self.wordMultivariate+1], decoderOut[:, self.genderMultivariate+self.speakerMultivariate+self.wordMultivariate+1 : self.genderMultivariate+self.speakerMultivariate+self.wordMultivariate+2]
         return genderProbs, speakerProbs, wordProbs, pitchMean, pitchLogVar, mu, logvar, z
