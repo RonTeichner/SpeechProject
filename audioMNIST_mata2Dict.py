@@ -1601,13 +1601,13 @@ def trainFunc(pitchScaler, t_transforms, v_transforms, beta, sentencesAudioInput
 
         batch = list()
         for singleWavIdx, singleWav in enumerate(data):
-            '''
+
             if not validateOnly:
                 audio, _, _ = t_transforms.apply((singleWav, fs), 0)
             else:
                 audio, _, _ = v_transforms.apply((singleWav, fs), 0)
-            '''
-            audio, _, _ = v_transforms.apply((singleWav, fs), 0)
+
+            #audio, _, _ = v_transforms.apply((singleWav, fs), 0)
             batch.append((audio, labels[singleWavIdx], pitchLabels[singleWavIdx], inputSentenceIndexes[singleWavIdx+batchStartIdx]))
 
 
