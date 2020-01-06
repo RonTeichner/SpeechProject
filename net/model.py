@@ -11,13 +11,14 @@ from torchparse import parse_cfg
 
 # Architecture inspiration from: https://github.com/keunwoochoi/music-auto_tagging-keras
 class AudioCRNN(BaseModel):
-    def __init__(self, config={}, nDrawsFromSingleEncoderOutput=1, state_dict=None):
+    def __init__(self, config={}, nDrawsFromSingleEncoderOutput=1, nDrawsFromSingleEncoderOutputEval=100, state_dict=None):
         super(AudioCRNN, self).__init__(config)
         
         in_chan = 2 if config['transforms']['args']['channels'] == 'stereo' else 1
 
         #self.classes = classes
         self.nDrawsFromSingleEncoderOutput = nDrawsFromSingleEncoderOutput
+        self.nDrawsFromSingleEncoderOutputEval = nDrawsFromSingleEncoderOutputEval
         self.decoderInnerWidth = 100
         self.genderMultivariate = 2
         self.speakerMultivariate = 60
@@ -75,8 +76,8 @@ class AudioCRNN(BaseModel):
         #h4 = self.LeakyReLU(self.fc4(h3))
         #h5 = self.fc5(h4)
         h5 = self.LeakyReLU(self.fc5(z))
-        h6 = self.LeakyReLU(self.fc6(h5))
-        return h6 # h3 here performed good without p(z) constrain
+        #h6 = self.LeakyReLU(self.fc6(h5))
+        return h5 # h3 here performed good without p(z) constrain
 
     def encoder(self, batch):
         # x-> (batch, time, channel)
@@ -119,7 +120,10 @@ class AudioCRNN(BaseModel):
     def forward(self, batch):
         mu, logvar = self.encoder(batch)
         # plt.plot(batch[0][0].cpu().numpy())
-        z = self.reparameterize(mu.repeat(self.nDrawsFromSingleEncoderOutput, 1), logvar.repeat(self.nDrawsFromSingleEncoderOutput, 1))
+        if self.training:
+            z = self.reparameterize(mu.repeat(self.nDrawsFromSingleEncoderOutput, 1), logvar.repeat(self.nDrawsFromSingleEncoderOutput, 1))
+        else:
+            z = self.reparameterize(mu.repeat(self.nDrawsFromSingleEncoderOutputEval, 1), logvar.repeat(self.nDrawsFromSingleEncoderOutputEval, 1))
         decoderOut = self.decoder(z)
         genderProbs, speakerProbs, wordProbs, pitchMean, pitchLogVar = decoderOut[:, :self.genderMultivariate], decoderOut[:, self.genderMultivariate:self.genderMultivariate+self.speakerMultivariate], decoderOut[:, self.genderMultivariate+self.speakerMultivariate : self.genderMultivariate+self.speakerMultivariate+self.wordMultivariate], decoderOut[:, self.genderMultivariate+self.speakerMultivariate+self.wordMultivariate : self.genderMultivariate+self.speakerMultivariate+self.wordMultivariate+1], decoderOut[:, self.genderMultivariate+self.speakerMultivariate+self.wordMultivariate+1 : self.genderMultivariate+self.speakerMultivariate+self.wordMultivariate+2]
         return genderProbs, speakerProbs, wordProbs, pitchMean, pitchLogVar, mu, logvar, z

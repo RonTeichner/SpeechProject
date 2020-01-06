@@ -72,7 +72,7 @@ path2MaxSentence = './maxSentence.pt'
 path2AllLengths = './allLengths.pt'
 
 enableWordOnlyClassificationAtEncoderOutput = False
-enableTrain_wrt_groundTruth = False
+enableTrain_wrt_groundTruth = True
 enableSpectrogram = False
 
 nGenders = 2
@@ -187,16 +187,19 @@ m_name = 'AudioCRNN'
 config = json.load(open('my-config.json'))
 config['net_mode'] = 'init'
 config['cfg'] = 'crnn.cfg'
-model = net_module.AudioCRNN(config=config, nDrawsFromSingleEncoderOutput=100).to('cuda')
+model = net_module.AudioCRNN(config=config, nDrawsFromSingleEncoderOutput=5, nDrawsFromSingleEncoderOutputEval=10).to('cuda')
 
 trainable_params = filter(lambda p: p.requires_grad, model.parameters())
 
 opt_name = config['optimizer']['type']
 opt_args = config['optimizer']['args']
+#opt_args['lr'] = 1e-3
 optimizer = getattr(torch.optim, opt_name)(trainable_params, **opt_args)
+#optimizer = optim.Adam(model.parameters(), lr=1e-3)
 
 lr_name = config['lr_scheduler']['type']
 lr_args = config['lr_scheduler']['args']
+#lr_args['step_size'] = 1000
 if lr_name == 'None':
     lr_scheduler = None
 else:
