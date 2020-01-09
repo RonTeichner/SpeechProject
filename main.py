@@ -85,6 +85,9 @@ numberOfTrainWords(metadata)
 '''
 genderDatasetsFeatures = pickle.load(open(path2GenderFeatures, "rb"))
 plt.imshow(genderDatasetsFeatures['train'][0][0][0:100,:].transpose(), aspect='auto')
+plt.xlabel('sec')
+plt.ylabel('MFCC')
+plt.title('Speech MFCC')
 plt.savefig('MFCC_example.png')
 '''
 if enableGenderTrain:
