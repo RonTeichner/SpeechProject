@@ -1506,7 +1506,7 @@ def loss_function(beta, mu, logvar, genderProbs, speakerProbs, wordProbs, pitchM
     pitchMean = torch.squeeze(pitchMean)
     pitchLogVar = torch.squeeze(pitchLogVar)
 
-    pitchNLL = 0#-(-0.4 - torch.mul(pitchLogVar, 0.5) - torch.mul(torch.pow(torch.div(sampledPitch - pitchMean, torch.exp(torch.mul(pitchLogVar, 0.5))), 2), 0.5))
+    pitchNLL = -(-0.4 - torch.mul(pitchLogVar, 0.5) - torch.mul(torch.pow(torch.div(sampledPitch - pitchMean, torch.exp(torch.mul(pitchLogVar, 0.5))), 2), 0.5))
     '''
     t = time.time()
     pitchNLL = [torch.distributions.normal.Normal(pitchMean[pitchIdx], pitchLogVar[pitchIdx].mul(0.5).exp_()).log_prob(sampledPitch[pitchIdx]) for pitchIdx in range(pitchMean.shape[0])]
@@ -1666,7 +1666,7 @@ def trainFunc(pitchScaler, t_transforms, v_transforms, beta, sentencesAudioInput
             else:
                 pitchNormalizedMean, pitchNormalizedLogVar = pitchMean.cpu().detach(), pitchLogVar.cpu().detach()
                 pitchMean, pitchLogVar = torch.tensor(pitchScaler.inverse_transform(pitchNormalizedMean)), torch.mul(torch.log(torch.tensor(pitchScaler.inverse_transform(np.exp(np.multiply(pitchNormalizedLogVar, 0.5))))), 2)
-                probabilitiesLUT += getProbabilitiesLUT(F.softmax(genderProbs, dim=1).cpu().detach(), F.softmax(speakerProbs, dim=1).cpu().detach(), F.softmax(wordProbs, dim=1).cpu().detach(), 0*pitchMean, 0*pitchLogVar, nDecoders)
+                probabilitiesLUT += getProbabilitiesLUT(F.softmax(genderProbs, dim=1).cpu().detach(), F.softmax(speakerProbs, dim=1).cpu().detach(), F.softmax(wordProbs, dim=1).cpu().detach(), pitchMean, pitchLogVar, nDecoders)
 
     lr_scheduler.step()
     if validateOnly:
