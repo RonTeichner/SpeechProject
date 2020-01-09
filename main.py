@@ -81,6 +81,12 @@ print('nMales, nFemales = %d, %d' % metadata.get_number_of_males_females())
 
 numberOfTrainWords(metadata)
 
+# code for ploting MFCC:
+'''
+genderDatasetsFeatures = pickle.load(open(path2GenderFeatures, "rb"))
+plt.imshow(genderDatasetsFeatures['train'][0][0][0:100,:].transpose(), aspect='auto')
+plt.savefig('MFCC_example.png')
+'''
 if enableGenderTrain:
     # create\load gender features:
     if os.path.isfile(path2GenderFeatures):

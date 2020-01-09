@@ -170,6 +170,7 @@ else:
 #model = VAE(measDim=nSamplesIn SingleLSTM_input, lstmHiddenSize=12, lstmNumLayers=1, nDrawsFromSingleEncoderOutput=100, zDim=10).cuda()
 
 # code to print an example wav signal:
+'''
 sentencesDatasetsAudioValidate = pickle.load(open(path2SentencesAudioValidate, "rb"))
 wav = sentencesDatasetsAudioValidate[0][1][1]
 tVec = np.arange(wav.shape[0])
@@ -177,7 +178,7 @@ plt.plot(tVec, wav)
 plt.xlabel('sec')
 plt.title('Speech wav')
 plt.savefig('./wavExample.png')
-
+'''
 if enableSpectrogram:
     nSamplesInSingleLSTM_input = sentencesAudioInputMatrixTrain.shape[-1]
 else:
