@@ -173,11 +173,25 @@ else:
 '''
 sentencesDatasetsAudioValidate = pickle.load(open(path2SentencesAudioValidate, "rb"))
 wav = sentencesDatasetsAudioValidate[0][1][1]
+wav01 = sentencesDatasetsAudioValidate[1][1][1]
 tVec = np.arange(wav.shape[0])
+tVec01 = np.arange(wav01.shape[0])
+tVecTotal = np.arange(wav.shape[0]+wav01.shape[0])
+wavTotal = np.concatenate((wav, wav01))
 plt.plot(tVec, wav)
 plt.xlabel('sec')
 plt.title('Speech wav')
 plt.savefig('./wavExample.png')
+
+plt.plot(tVec01, wav01)
+plt.xlabel('sec')
+plt.title('Speech wav')
+plt.savefig('./wav01Example.png')
+
+plt.plot(tVecTotal, wavTotal)
+plt.xlabel('sec')
+plt.title('Speech wav')
+plt.savefig('./wavTotalExample.png')
 '''
 if enableSpectrogram:
     nSamplesInSingleLSTM_input = sentencesAudioInputMatrixTrain.shape[-1]
