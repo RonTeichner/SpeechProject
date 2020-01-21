@@ -1056,60 +1056,26 @@ def computePitchDistribution(sentence):
         plt.show()
     return filteringDict, smoothingDict
 
-def plotSentenceResults(testSet, sentencesEstimationResults, maleIdx, femaleIdx, path2fig, sentencesEstimationResults_NN=None):
+def plotSentenceResults(testSet, sentencesEstimationResults, path2fig, sentencesEstimationResults_NN=None):
     # convert model first-word estimations to np-arrays:
-    genderIdx_NN, speakerIdx_NN, wordIdx_NN, pitchIdx_NN = np.arange(4)
+    wordIdx_NN = np.arange(1)
     nSentences = len(sentencesEstimationResults)
-    classCategories = ['word', 'gender', 'speaker', 'pitchStd', 'pitchMean']
+    classCategories = ['word']
     collectedFirstWordSentenceResults = dict()
     for estimationClass in classCategories:
         collectedFirstWordSentenceResults[estimationClass] = dict()
-        firstDigit_filtering, firstDigit_smoothing, firstDigit_INPV = np.zeros(nSentences), np.zeros(nSentences), np.zeros(nSentences)
+        firstDigit_INPV = np.zeros(nSentences)
         for sentenceIdx in range(nSentences):
             sentenceResult = sentencesEstimationResults[sentenceIdx]
             if sentencesEstimationResults_NN is not None: weights_NN, LUT_NN = sentencesEstimationResults_NN[sentenceIdx]
             if estimationClass == 'word':
                 trueFirstDigit = sentenceResult['groundTruth']['Digits'][0]
-                firstDigit_filtering[sentenceIdx] = sentenceResult['results'][estimationClass]['filtering'][0][trueFirstDigit]
-                firstDigit_smoothing[sentenceIdx] = sentenceResult['results'][estimationClass]['smoothing'][0][trueFirstDigit]
+
                 if sentencesEstimationResults_NN is not None:
                     trueValIndexesInLUT = np.where(LUT_NN[:, wordIdx_NN] == trueFirstDigit)[0]
                     firstDigit_INPV[sentenceIdx] = np.sum([weights_NN[i] for i in trueValIndexesInLUT])
-            elif estimationClass == 'gender':
-                trueGender = sentenceResult['groundTruth']['SpeakerGender']
-                if trueGender == 'male':
-                    trueGenderIdx = maleIdx
-                else:
-                    trueGenderIdx = femaleIdx
-                firstDigit_filtering[sentenceIdx] = sentenceResult['results'][estimationClass]['filtering'][0][trueGenderIdx]
-                firstDigit_smoothing[sentenceIdx] = sentenceResult['results'][estimationClass]['smoothing'][0][trueGenderIdx]
-                if sentencesEstimationResults_NN is not None:
-                    trueValIndexesInLUT = np.where(LUT_NN[:, genderIdx_NN] == trueGenderIdx)[0]
-                    firstDigit_INPV[sentenceIdx] = np.sum([weights_NN[i] for i in trueValIndexesInLUT])
-            elif estimationClass == 'speaker':
-                trueSpeakerNo = int(sentenceResult['groundTruth']['SpeakerNo']) - 1
-                firstDigit_filtering[sentenceIdx] = sentenceResult['results'][estimationClass]['filtering'][0][trueSpeakerNo]
-                firstDigit_smoothing[sentenceIdx] = sentenceResult['results'][estimationClass]['smoothing'][0][trueSpeakerNo]
-                if sentencesEstimationResults_NN is not None:
-                    trueValIndexesInLUT = np.where(LUT_NN[:, speakerIdx_NN] == trueSpeakerNo)[0]
-                    firstDigit_INPV[sentenceIdx] = np.sum([weights_NN[i] for i in trueValIndexesInLUT])
-            elif estimationClass == 'pitchStd':
-                firstDigit_filtering[sentenceIdx] = calcStdOfMixOf2(sentenceResult['results']['pitch']['filtering']['means'][:, 0], sentenceResult['results']['pitch']['filtering']['covs'][:, 0], sentenceResult['results']['pitch']['filtering']['weights'][:, 0])
-                firstDigit_smoothing[sentenceIdx] = calcStdOfMixOf2(sentenceResult['results']['pitch']['filtering']['means'][:, -1], sentenceResult['results']['pitch']['filtering']['covs'][:, -1], sentenceResult['results']['pitch']['filtering']['weights'][:, -1])
-                if sentencesEstimationResults_NN is not None:
-                    pitchValues_NN = LUT_NN[:, pitchIdx_NN]
-                    pitchMean_NN = pitchValues_NN.mean()
-                    pitchVar = np.sum(np.multiply(weights_NN, np.power(pitchValues_NN-pitchMean_NN, 2)))
-                    firstDigit_INPV[sentenceIdx] = np.sqrt(pitchVar)
-            elif estimationClass == 'pitchMean':
-                firstDigit_filtering[sentenceIdx] = calcMeanOfMixOf2(sentenceResult['results']['pitch']['filtering']['means'][:, 0], sentenceResult['results']['pitch']['filtering']['covs'][:, 0], sentenceResult['results']['pitch']['filtering']['weights'][:, 0])
-                firstDigit_smoothing[sentenceIdx] = calcMeanOfMixOf2(sentenceResult['results']['pitch']['filtering']['means'][:, -1], sentenceResult['results']['pitch']['filtering']['covs'][:, -1], sentenceResult['results']['pitch']['filtering']['weights'][:, -1])
-                if sentencesEstimationResults_NN is not None:
-                    pitchValues_NN = LUT_NN[:, pitchIdx_NN]
-                    pitchMean_NN = pitchValues_NN.mean()
-                    firstDigit_INPV[sentenceIdx] = pitchMean_NN
-        collectedFirstWordSentenceResults[estimationClass]['filtering'] = firstDigit_filtering
-        collectedFirstWordSentenceResults[estimationClass]['smoothing'] = firstDigit_smoothing
+
+
         if sentencesEstimationResults_NN is not None:
             collectedFirstWordSentenceResults[estimationClass]['INPV'] = firstDigit_INPV
 
@@ -1119,69 +1085,37 @@ def plotSentenceResults(testSet, sentencesEstimationResults, maleIdx, femaleIdx,
     for plotIdx, estimationClass in enumerate(classCategories):
         plt.subplot(2, len(classCategories), plotIdx + 1)
         n_bins = 100
-        #n, bins, patches = plt.hist(collectedFirstWordSentenceResults[estimationClass]['rawFrameMahalanobis'], n_bins, density=True, histtype='step', cumulative=True, label='Raw')
-        n, bins, patches = plt.hist(collectedFirstWordSentenceResults[estimationClass]['filtering'], n_bins, density=True, histtype='step', cumulative=True, label='Filtering')
-        n, bins, patches = plt.hist(collectedFirstWordSentenceResults[estimationClass]['smoothing'], n_bins, density=True, histtype='step', cumulative=True, label='Smoothing')
+
         if sentencesEstimationResults_NN is not None:
             n, bins, patches = plt.hist(collectedFirstWordSentenceResults[estimationClass]['INPV'], n_bins, density=True, histtype='step', cumulative=True, label='INPV')
-        #meanRaw = collectedFirstWordSentenceResults[estimationClass]['rawFrameMahalanobis'].mean()
-        meanFiltering = collectedFirstWordSentenceResults[estimationClass]['filtering'].mean()
-        meanSmoothing = collectedFirstWordSentenceResults[estimationClass]['smoothing'].mean()
+
         if sentencesEstimationResults_NN is not None:
             meanINPV = collectedFirstWordSentenceResults[estimationClass]['INPV'].mean()
         plt.grid(True)
         plt.legend(loc='right')
         #plt.title(estimationClass + ' likelihood CDF; avg(R,F,S) = (%02.0f%%,%02.0f%%,%02.0f%%)' % (meanRaw * 100, meanFiltering * 100, meanSmoothing * 100))
         if sentencesEstimationResults_NN is not None:
-            if estimationClass == 'pitchStd':
-                plt.title(estimationClass + ' avg(F,S) = (%02.0f,%02.0f,%02.0f) Hz' % (meanFiltering, meanSmoothing, meanINPV))
-                plt.xlabel('Hz')
-            elif estimationClass == 'pitchMean':
-                plt.title(estimationClass + ' avg(F,S) = (%02.0f,%02.0f,%02.0f) Hz' % (meanFiltering, meanSmoothing, meanINPV))
-                plt.xlabel('Hz')
-            else:
-                plt.title(estimationClass + ' avg(F,S) = (%02.0f%%,%02.0f%%,%02.0f%%)' % (meanFiltering * 100, meanSmoothing * 100, meanINPV * 100))
-                plt.xlabel('likelihood')
-        else:
-            if estimationClass == 'pitchStd':
-                plt.title(estimationClass + ' avg(F,S) = (%02.0f,%02.0f) Hz' % (meanFiltering, meanSmoothing))
-                plt.xlabel('Hz')
-            elif estimationClass == 'pitchMean':
-                plt.title(estimationClass + ' avg(F,S) = (%02.0f,%02.0f) Hz' % (meanFiltering, meanSmoothing))
-                plt.xlabel('Hz')
-            else:
-                plt.title(estimationClass + ' avg(F,S) = (%02.0f%%,%02.0f%%)' % (meanFiltering * 100, meanSmoothing * 100))
-                plt.xlabel('likelihood')
+
+            plt.title(estimationClass + ' avg = (%02.0f%%)' % (meanINPV * 100))
+            plt.xlabel('likelihood')
+
 
         plt.subplot(2, len(classCategories), plotIdx + 1 + len(classCategories))
         n_bins = 20
-        # n, bins, patches = plt.hist(collectedFirstWordSentenceResults[estimationClass]['rawFrameMahalanobis'], n_bins, density=True, histtype='step', cumulative=True, label='Raw')
-        n, bins, patches = plt.hist(collectedFirstWordSentenceResults[estimationClass]['filtering'], n_bins, density=True, histtype='step', cumulative=False, label='Filtering')
-        n, bins, patches = plt.hist(collectedFirstWordSentenceResults[estimationClass]['smoothing'], n_bins, density=True, histtype='step', cumulative=False, label='Smoothing')
+
         if sentencesEstimationResults_NN is not None:
             n, bins, patches = plt.hist(collectedFirstWordSentenceResults[estimationClass]['INPV'], n_bins, density=True, histtype='step', cumulative=False, label='INPV')
-        # meanRaw = collectedFirstWordSentenceResults[estimationClass]['rawFrameMahalanobis'].mean()
-        meanFiltering = collectedFirstWordSentenceResults[estimationClass]['filtering'].mean()
-        meanSmoothing = collectedFirstWordSentenceResults[estimationClass]['smoothing'].mean()
+
         if sentencesEstimationResults_NN is not None:
             meanINPV = collectedFirstWordSentenceResults[estimationClass]['INPV'].mean()
         plt.grid(True)
         plt.legend(loc='right')
         # plt.title(estimationClass + ' likelihood CDF; avg(R,F,S) = (%02.0f%%,%02.0f%%,%02.0f%%)' % (meanRaw * 100, meanFiltering * 100, meanSmoothing * 100))
         if sentencesEstimationResults_NN is not None:
-            if estimationClass == 'pitch':
-                #plt.title(estimationClass + ' std histogram; avg(F,S) = (%02.0f,%02.0f,%02.0f) Hz' % (meanFiltering, meanSmoothing, meanINPV))
-                plt.xlabel('Hz')
-            else:
-                #plt.title(estimationClass + ' likelihood histogram; avg(F,S) = (%02.0f%%,%02.0f%%,%02.0f%%)' % (meanFiltering * 100, meanSmoothing * 100, meanINPV * 100))
-                plt.xlabel('likelihood')
-        else:
-            if estimationClass == 'pitch':
-                #plt.title(estimationClass + ' std histogram; avg(F,S) = (%02.0f,%02.0f) Hz' % (meanFiltering, meanSmoothing))
-                plt.xlabel('Hz')
-            else:
-                #plt.title(estimationClass + ' likelihood histogram; avg(F,S) = (%02.0f%%,%02.0f%%)' % (meanFiltering * 100, meanSmoothing * 100))
-                plt.xlabel('likelihood')
+
+            #plt.title(estimationClass + ' likelihood histogram; avg(F,S) = (%02.0f%%,%02.0f%%,%02.0f%%)' % (meanFiltering * 100, meanSmoothing * 100, meanINPV * 100))
+            plt.xlabel('likelihood')
+
     plt.savefig(path2fig)
     print('fig saved')
     plt.close()
@@ -1490,66 +1424,30 @@ def loss_function_classification_prob(wordProbs, sampledWord):
     nCorrectPredictions = (F.softmax(wordProbs, dim=1).argmax(dim=1) == sampledWord).sum()
     return wordNLL.reshape(-1, batchSize).sum(), nCorrectPredictions
 
-def loss_function(beta, mu, logvar, genderProbs, speakerProbs, wordProbs, pitchMean, pitchLogVar, sampledGender, sampledSpeaker, sampledWord, sampledPitch, nDecoders):
+def loss_function(mu, sampledWord):
     batchSize = sampledWord.numel()
 
-    sampledGender = sampledGender.unsqueeze(1).repeat(nDecoders, 1).reshape(-1)
-    genderNLL = F.cross_entropy(genderProbs, sampledGender, reduction='none')
+    sampledWord = sampledWord.unsqueeze(1).repeat(1, 1).reshape(-1)
+    wordNLL = F.cross_entropy(mu, sampledWord, reduction='none')
 
-    sampledSpeaker = sampledSpeaker.unsqueeze(1).repeat(nDecoders, 1).reshape(-1)
-    speakerNLL = F.cross_entropy(speakerProbs, sampledSpeaker, reduction='none')
+    totalNLL_max = (wordNLL).reshape(-1, batchSize).max(dim=0)[0].sum()
 
-    sampledWord = sampledWord.unsqueeze(1).repeat(nDecoders, 1).reshape(-1)
-    wordNLL = F.cross_entropy(wordProbs, sampledWord, reduction='none')
+    return totalNLL_max
 
-    sampledPitch = sampledPitch.unsqueeze(1).repeat(nDecoders, 1).reshape(-1)
-    pitchMean = torch.squeeze(pitchMean)
-    pitchLogVar = torch.squeeze(pitchLogVar)
-
-    pitchNLL = -(-0.4 - torch.mul(pitchLogVar, 0.5) - torch.mul(torch.pow(torch.div(sampledPitch - pitchMean, torch.exp(torch.mul(pitchLogVar, 0.5))), 2), 0.5))
-    '''
-    t = time.time()
-    pitchNLL = [torch.distributions.normal.Normal(pitchMean[pitchIdx], pitchLogVar[pitchIdx].mul(0.5).exp_()).log_prob(sampledPitch[pitchIdx]) for pitchIdx in range(pitchMean.shape[0])]
-    print('loss function - pitch for duration: ', time.time() - t, ' sec')
-    '''
-    '''
-    t = time.time()
-    pitchNLL = torch.zeros(pitchMean.shape[0]).cuda()
-    print('loss function - pitch cuda upload duration: ', time.time() - t, ' sec')
-    
-    t = time.time()
-    for pitchIdx in range(pitchMean.shape[0]):
-        pitchNLL[pitchIdx] = -torch.distributions.normal.Normal(pitchMean[pitchIdx], pitchLogVar[pitchIdx].mul(0.5).exp_()).log_prob(sampledPitch[pitchIdx])
-    print('loss function - pitch for duration: ', time.time() - t, ' sec')
-    '''
-
-    totalNLL_max = (genderNLL+speakerNLL+wordNLL+pitchNLL).reshape(-1, batchSize).max(dim=0)[0].sum()  # each column has the nDecoders different outputs from the same encoder's output, then max is performed
-    #totalNLL_max = (genderNLL+speakerNLL+wordNLL).reshape(-1, batchSize).max(dim=0)[0].sum()
-    #totalNLL_max = (wordNLL).reshape(-1, batchSize).max(dim=0)[0].sum()
-    #totalNLL_max = (genderNLL).reshape(-1, batchSize).max(dim=0)[0].sum()
-
-    KLD = -0.5 * torch.sum(1 + logvar - mu.pow(2) - logvar.exp())
-
-    return totalNLL_max + beta*KLD
-
-def getProbabilitiesLUT(genderProbs, speakerProbs, wordProbs, pitchMean, pitchLogVar, nDecoders):
-    batchSize = int(genderProbs.shape[0]/nDecoders)
+def getProbabilitiesLUT(wordProbs):
+    batchSize = int(wordProbs.shape[0]/1)
     n_clusters = 3
     probabilitiesLUT = list()
     # the nDecoders samples for input no. i to the encoder is at genderProbs[:, i, :] :
-    genderProbs, speakerProbs, wordProbs, pitchMean, pitchLogVar = genderProbs.reshape(nDecoders, batchSize, -1), speakerProbs.reshape(nDecoders, batchSize, -1), wordProbs.reshape(nDecoders, batchSize, -1), pitchMean.reshape(nDecoders, batchSize, -1), pitchLogVar.reshape(nDecoders, batchSize, -1)
+    wordProbs = wordProbs.reshape(1, batchSize, -1)
     for batchIdx in range(batchSize):
-        singleInputGenderProb, singleInputSpeakerProb, singleInputWordProb, singleInputPitchMean, singleInputPitchStd = genderProbs[:, batchIdx, :], speakerProbs[:, batchIdx, :], wordProbs[:, batchIdx, :], pitchMean[:, batchIdx, :], np.exp(np.multiply(pitchLogVar[:, batchIdx, :], 0.5))
-        sampledGender, sampledSpeaker, sampledWord, sampledPitch = np.zeros((nDecoders, 1)), np.zeros((nDecoders, 1)), np.zeros((nDecoders, 1)), np.zeros((nDecoders, 1))
-        for decoderIdx in range(nDecoders):
-            pvals = singleInputGenderProb[decoderIdx]# / singleInputGenderProb[decoderIdx].sum()
-            sampledGender[decoderIdx] = int(np.argwhere(torch.distributions.multinomial.Multinomial(1, probs=pvals).sample().numpy()))
-            pvals = singleInputSpeakerProb[decoderIdx]# / singleInputSpeakerProb[decoderIdx].sum()
-            sampledSpeaker[decoderIdx] = int(np.argwhere(torch.distributions.multinomial.Multinomial(1, probs=pvals).sample().numpy()))
+        singleInputWordProb = wordProbs[:, batchIdx, :]
+        sampledWord = np.zeros((1, 1))
+        for decoderIdx in range(1):
             pvals = singleInputWordProb[decoderIdx]# / singleInputWordProb[decoderIdx].sum()
             sampledWord[decoderIdx] = int(np.argwhere(torch.distributions.multinomial.Multinomial(1, probs=pvals).sample().numpy()))
-            sampledPitch[decoderIdx] = torch.distributions.normal.Normal(loc=singleInputPitchMean[decoderIdx], scale=singleInputPitchStd[decoderIdx]).sample().numpy()
-        X = np.concatenate((sampledGender, sampledSpeaker, sampledWord, sampledPitch), axis=1)
+
+        X = sampledWord
         if X.shape[0] == 1: # single decoder
             clustersWeights = np.ones(1)
             clustersRepresentatives = X
@@ -1559,13 +1457,13 @@ def getProbabilitiesLUT(genderProbs, speakerProbs, wordProbs, pitchMean, pitchLo
             X_scaled = scaler.fit_transform(X)
             # cluster X with KMeans:
             kmeans = KMeans(n_clusters=n_clusters).fit(X_scaled)
-            clustersWeights = [(kmeans.labels_ == clusterIdx).sum()/nDecoders for clusterIdx in range(n_clusters)]
+            clustersWeights = [(kmeans.labels_ == clusterIdx).sum()/1 for clusterIdx in range(n_clusters)]
             closest, _ = pairwise_distances_argmin_min(kmeans.cluster_centers_, X_scaled)
             clustersRepresentatives = X[closest]
         probabilitiesLUT.append([clustersWeights, clustersRepresentatives])
     return probabilitiesLUT
 
-def trainFunc(pitchScaler, t_transforms, v_transforms, beta, sentencesAudioInputMatrix, sentencesEstimationResults_sampled, sentencesEstimationPitchResults_sampled, model, optimizer, lr_scheduler, epoch, validateOnly=False, enableSpectrogram=False, enableSimpleClassification=False):
+def trainFunc(t_transforms, v_transforms, sentencesAudioInputMatrix, sentencesEstimationResults_sampled, model, optimizer, lr_scheduler, epoch, validateOnly=False):
     if validateOnly:
         model.eval()
     else:
@@ -1577,15 +1475,15 @@ def trainFunc(pitchScaler, t_transforms, v_transforms, beta, sentencesAudioInput
     batchSize = 100
     nSentences = len(sentencesAudioInputMatrix)
     nBatches = int(np.ceil(nSentences/batchSize))
-    nDecoders = model.nDrawsFromSingleEncoderOutput if model.training else model.nDrawsFromSingleEncoderOutputEval
+    nDecoders = 1
 
     inputSentenceIndexes = torch.randperm(nSentences)
-    sentencesEstimationResults_sampled, sentencesEstimationPitchResults_sampled = sentencesEstimationResults_sampled[inputSentenceIndexes], sentencesEstimationPitchResults_sampled[inputSentenceIndexes]
+    sentencesEstimationResults_sampled = sentencesEstimationResults_sampled[inputSentenceIndexes]
     sentencesAudioInputMatrix = [sentencesAudioInputMatrix[index] for index in inputSentenceIndexes]
 
 
     if validateOnly: probabilitiesLUT = list()
-    if enableSimpleClassification: nCorrectPredictions = 0.0
+
     for batchIdx in range(nBatches):
         batchStartIdx, batchStopIdx = batchIdx * batchSize, min(nSentences, (batchIdx + 1) * batchSize)
         if batchIdx == 0: print('epoch %d: starting batch %d out of %d' % (epoch, batchIdx, nBatches))
@@ -1596,8 +1494,8 @@ def trainFunc(pitchScaler, t_transforms, v_transforms, beta, sentencesAudioInput
             nSamples2Crop = data.shape[0] - int(data.shape[0] / model.measDim) * model.measDim
             data = (data[nSamples2Crop:]).transpose(1, 2).reshape(-1, model.measDim, data.shape[1]).transpose(1, 2)
         '''
-        labels = sentencesEstimationResults_sampled[batchStartIdx:batchStopIdx]#.long()  # .to('cuda')
-        pitchLabels = sentencesEstimationPitchResults_sampled[batchStartIdx:batchStopIdx]#.float()  # .to('cuda')
+        labels = sentencesEstimationResults_sampled[batchStartIdx:batchStopIdx, 0:1]#.long()  # .to('cuda')
+
 
         batch = list()
         for singleWavIdx, singleWav in enumerate(data):
@@ -1608,41 +1506,32 @@ def trainFunc(pitchScaler, t_transforms, v_transforms, beta, sentencesAudioInput
                 audio, _, _ = v_transforms.apply((singleWav, fs), 0)
 
             #audio, _, _ = v_transforms.apply((singleWav, fs), 0)
-            batch.append((audio, labels[singleWavIdx], pitchLabels[singleWavIdx], inputSentenceIndexes[singleWavIdx+batchStartIdx]))
+            batch.append((audio, labels[singleWavIdx], inputSentenceIndexes[singleWavIdx+batchStartIdx]))
 
 
 
         # sort_ind should point to length
         sort_ind = 0
         sorted_batch = sorted(batch, key=lambda x: x[0].size(sort_ind), reverse=True)
-        seqs, labels, pitchLabels, originalIndexes = zip(*sorted_batch)
+        seqs, labels, originalIndexes = zip(*sorted_batch)
 
         lengths, labels, originalIndexes = map(torch.LongTensor, [[x.size(sort_ind) for x in seqs], labels, originalIndexes])
-        _, pitchLabels = map(torch.FloatTensor, [[x.size(sort_ind) for x in seqs], pitchLabels])
 
         inputSentenceIndexes[batchStartIdx:batchStopIdx] = originalIndexes
 
         # seqs_pad -> (batch, time, channel)
         seqs_pad = torch.nn.utils.rnn.pad_sequence(seqs, batch_first=True, padding_value=0)
         # seqs_pad = seqs_pad_t.transpose(0,1)
-        batch = [seqs_pad, lengths, labels, pitchLabels]
+        batch = [seqs_pad, lengths, labels]
         batch = [b.to('cuda') for b in batch]
-        data = batch[:-2]
+        data = batch[:-1]
         data = data if len(data) > 1 else data[0]
 
-        sampledGender, sampledSpeaker, sampledWord, sampledPitch = batch[2][:, 0], batch[2][:, 1], batch[2][:, 2], batch[3][:, 0]
+        sampledWord = batch[2][:, 0]
 
         if not validateOnly: optimizer.zero_grad()
-        genderProbs, speakerProbs, wordProbs, pitchMean, pitchLogVar, mu, logvar, z = model(data)
-        #wordProbs = mu[:, :10]
-        # t = time.time()
-
-        if False:
-            loss, nCorrectPredictionsSingleBatch = loss_function_classification_prob(mu, sampledWord)
-            #nCorrectPredictions += nCorrectPredictionsSingleBatch.float()/batchSize
-        else:
-            loss = loss_function(beta, mu, logvar, genderProbs, speakerProbs, wordProbs, pitchMean, pitchLogVar, sampledGender, sampledSpeaker, sampledWord, sampledPitch, nDecoders)
-        #print(f'loss: {loss.item() / batchSize}')
+        mu = model(data)
+        loss = loss_function(mu, sampledWord)
 
         # print('loss function duration: ', 1000*(time.time()-t), ' ms')
         if not validateOnly:
@@ -1658,15 +1547,7 @@ def trainFunc(pitchScaler, t_transforms, v_transforms, beta, sentencesAudioInput
         if not validateOnly: optimizer.step()
 
         if validateOnly:
-            if enableSimpleClassification:
-                singleBatchProbabilitiesLUT = getProbabilitiesLUT(F.softmax(torch.div(torch.ones_like(genderProbs), genderProbs.shape[1]), dim=1).cpu().detach(), F.softmax(torch.div(torch.ones_like(speakerProbs), speakerProbs.shape[1]), dim=1).cpu().detach(), F.softmax(z, dim=1).cpu().detach(), pitchMean.cpu().detach(), pitchLogVar.cpu().detach(), nDecoders)
-                probabilitiesLUT += singleBatchProbabilitiesLUT
-                wordVecLUT, wordVecResults = wordVecFromProbabilitiesLUT(singleBatchProbabilitiesLUT), sampledWord.cpu().numpy()  # wordVecFromResults(sentencesEstimationResultsTrain[:1000])
-                print('%% correct in batch %d' % ((wordVecLUT.round() == wordVecResults.round()).sum() / len(wordVecLUT) * 100))
-            else:
-                pitchNormalizedMean, pitchNormalizedLogVar = pitchMean.cpu().detach(), pitchLogVar.cpu().detach()
-                pitchMean, pitchLogVar = torch.tensor(pitchScaler.inverse_transform(pitchNormalizedMean)), torch.mul(torch.log(torch.tensor(pitchScaler.inverse_transform(np.exp(np.multiply(pitchNormalizedLogVar, 0.5))))), 2)
-                probabilitiesLUT += getProbabilitiesLUT(F.softmax(genderProbs, dim=1).cpu().detach(), F.softmax(speakerProbs, dim=1).cpu().detach(), F.softmax(wordProbs, dim=1).cpu().detach(), pitchMean, pitchLogVar, nDecoders)
+            probabilitiesLUT += getProbabilitiesLUT(F.softmax(mu, dim=1).cpu().detach())
 
     lr_scheduler.step()
     if validateOnly:
@@ -1676,9 +1557,6 @@ def trainFunc(pitchScaler, t_transforms, v_transforms, beta, sentencesAudioInput
     else:
         probabilitiesLUTOut = list()
 
-    if enableSimpleClassification:
-        nCorrectPredictions = nCorrectPredictions/nBatches
-        print(f'%% correct predictions {nCorrectPredictions}')
 
     return total_loss / nBatches, probabilitiesLUTOut
 

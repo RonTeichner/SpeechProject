@@ -34,20 +34,10 @@ def gumbel_softmax(logits, temperature, latent_dim, categorical_dim):
     return y_hard.view(-1,latent_dim*categorical_dim)
 
 class AudioCRNN(BaseModel):
-    def __init__(self, config={}, nDrawsFromSingleEncoderOutput=1, nDrawsFromSingleEncoderOutputEval=100, enableDiscrete=False, state_dict=None):
+    def __init__(self, config={}):
         super(AudioCRNN, self).__init__(config)
-        
-        in_chan = 2 if config['transforms']['args']['channels'] == 'stereo' else 1
-        self.enableDiscrete = enableDiscrete
-        #self.classes = classes
-        self.nDrawsFromSingleEncoderOutput = nDrawsFromSingleEncoderOutput
-        self.nDrawsFromSingleEncoderOutputEval = nDrawsFromSingleEncoderOutputEval
-        self.decoderInnerWidth = 100
-        self.genderMultivariate = 2
-        self.speakerMultivariate = 60
-        self.wordMultivariate = 10
-        self.nContinuesParameters = 1  # pitch
 
+        in_chan = 2 if config['transforms']['args']['channels'] == 'stereo' else 1
 
         self.lstm_units = 64
         self.lstm_layers = 2
@@ -59,20 +49,12 @@ class AudioCRNN(BaseModel):
 
         # shape -> (channel, freq, token_time)
         self.net = parse_cfg(config['cfg'], in_shape=[in_chan, self.spec.num_mels, 400])
-        self.zDim = int(self.net['dense'].linear_0.out_features / 2)
-
-        self.outDim = self.genderMultivariate + self.speakerMultivariate + self.wordMultivariate + 2*self.nContinuesParameters
-
-        self.fc5 = nn.Linear(self.zDim, self.outDim)
-        self.fc6 = nn.Linear(self.outDim, self.outDim)
 
         # general:
         self.logSoftMax = nn.LogSoftmax(dim=1)
         self.LeakyReLU = nn.LeakyReLU()
         self.tanh = nn.Tanh()
         self.sigmoid = nn.Sigmoid()
-        self.categorical_dim = 2
-        self.temperature = 1.0
 
 
     def _many_to_one(self, t, lengths):
@@ -90,19 +72,6 @@ class AudioCRNN(BaseModel):
 
         #return torch.where(lengths > 0, lengths, torch.tensor(1, device=lengths.device))
         return torch.where(lengths > 0, lengths, (torch.tensor(1, device=lengths.device)).float())
-
-    def reparameterize(self, mu, logvar):
-        std = torch.exp(0.5*logvar)
-        eps = torch.randn_like(std)
-        return mu + eps*std
-
-    def decoder(self, z):
-        #h3 = self.LeakyReLU(self.fc3(z))
-        #h4 = self.LeakyReLU(self.fc4(h3))
-        #h5 = self.fc5(h4)
-        h5 = self.LeakyReLU(self.fc5(z))
-        #h6 = self.LeakyReLU(self.fc6(h5))
-        return h5 # h3 here performed good without p(z) constrain
 
     def encoder(self, batch):
         # x-> (batch, time, channel)
@@ -143,33 +112,9 @@ class AudioCRNN(BaseModel):
         return mu, logvar
 
     def forward(self, batch):
-        mu, logvar = self.encoder(batch)
-        # plt.plot(batch[0][0].cpu().numpy())
-        if not self.enableDiscrete:
-            if self.training:
-                z = self.reparameterize(mu.repeat(self.nDrawsFromSingleEncoderOutput, 1), logvar.repeat(self.nDrawsFromSingleEncoderOutput, 1))
-            else:
-                z = self.reparameterize(mu.repeat(self.nDrawsFromSingleEncoderOutputEval, 1), logvar.repeat(self.nDrawsFromSingleEncoderOutputEval, 1))
-        else:
-            q = mu  # torch.cat((mu, logvar), dim=1)
-            q_y = q.view(q.size(0), int(0.5*self.zDim), self.categorical_dim)
-            nRepeats = self.nDrawsFromSingleEncoderOutput if self.training else self.nDrawsFromSingleEncoderOutputEval
-            for i in range(nRepeats):
-                if i == 0:
-                    z = gumbel_softmax(q_y, self.temperature, int(0.5*self.zDim), self.categorical_dim)
-                else:
-                    z = torch.cat((z, gumbel_softmax(q_y, self.temperature, int(0.5*self.zDim), self.categorical_dim)), dim=0)
-        decoderOut = self.decoder(z)
-        genderProbs, speakerProbs, wordProbs, pitchMean, pitchLogVar = decoderOut[:, :self.genderMultivariate], decoderOut[:, self.genderMultivariate:self.genderMultivariate+self.speakerMultivariate], decoderOut[:, self.genderMultivariate+self.speakerMultivariate : self.genderMultivariate+self.speakerMultivariate+self.wordMultivariate], decoderOut[:, self.genderMultivariate+self.speakerMultivariate+self.wordMultivariate : self.genderMultivariate+self.speakerMultivariate+self.wordMultivariate+1], decoderOut[:, self.genderMultivariate+self.speakerMultivariate+self.wordMultivariate+1 : self.genderMultivariate+self.speakerMultivariate+self.wordMultivariate+2]
-        return genderProbs, speakerProbs, wordProbs, pitchMean, pitchLogVar, mu, logvar, z
+        mu, _ = self.encoder(batch)
+        return mu
 
-
-    def predict(self, x):
-        with torch.no_grad():
-            out_raw = self.forward( x )
-            out = torch.exp(out_raw)
-            max_ind = out.argmax().item()        
-            return self.classes[max_ind], out[:,max_ind].item()
 
 
 class AudioCNN(AudioCRNN):
